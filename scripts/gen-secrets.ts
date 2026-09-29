@@ -12,9 +12,10 @@ async function main(): Promise<void> {
   }
   const passwordHash = await hash(password, {});
   const sessionSecret = crypto.randomBytes(32).toString('base64');
-  console.log('\nДобавь в .env:\n');
-  console.log(`WEB_PASSWORD_HASH=${passwordHash}`);
-  console.log(`SESSION_SECRET=${sessionSecret}`);
+  console.log('\nДобавь в .env (кавычки обязательны: внутри хеша есть $,\n' +
+    'которые docker compose без кавычек подставляет как переменные):\n');
+  console.log(`WEB_PASSWORD_HASH='${passwordHash}'`);
+  console.log(`SESSION_SECRET='${sessionSecret}'`);
 }
 
 void main();

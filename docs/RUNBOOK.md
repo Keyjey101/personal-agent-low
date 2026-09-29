@@ -50,11 +50,14 @@ docker compose run --rm app node dist/scripts/gen-secrets.js
 Вывод вида:
 
 ```text
-WEB_PASSWORD_HASH=$argon2id$...длинная строка...
-SESSION_SECRET=c29tZS1yYW5kb20t...
+WEB_PASSWORD_HASH='$argon2id$...длинная строка...'
+SESSION_SECRET='c29tZS1yYW5kb20t...'
 ```
 
-Вставь обе строки в .env как есть. `SESSION_SECRET` — не пароль, просто случайный шум;
+Вставь обе строки в .env **вместе с одинарными кавычками**. Это не украшение: в argon2-хеше
+есть символы `$`, и docker compose в .env без кавычек подставляет их как переменные
+(в логе это видно как `WARN ... The "argon2id" variable is not set`), хеж приезжает в
+контейнер испорченным. `SESSION_SECRET` — не пароль, просто случайный шум;
 после первой установки его не меняй (иначе все сессии слетят — не страшно, просто перелогинишься).
 
 ## Установка
@@ -115,6 +118,8 @@ curl -f http://localhost:3000/healthz
 | Симптом | Что смотреть |
 |---|---|
 | 502 на gmyrya.com | `docker compose ps` (app жив?), `curl -f http://localhost:3000/healthz`, свободны ли порты: `ss -tlnp | grep -E ':3000|:3001'` |
+| WARN `The "argon2id" variable is not set` при `up` | Значения с `$` в .env не закавычены — оберни `WEB_PASSWORD_HASH` (и остальное с `$`) в одинарные кавычки и сделай `docker compose up -d` заново |
+| Контейнер стартует и сразу падает | `docker compose logs app --tail 30`. Если там `EACCES ... /data` — папка создана от root: `sudo chown -R 1000:1000 ./data` и `docker compose up -d` |
 | Бот молчит | `docker compose logs app`; проверь TELEGRAM_ALLOWED_CHAT_ID (чужие chat_id игнорируются с warn) |
 | «Мозг offline» в ответах | GLM_API_KEY / GLM_BASE_URL / GLM_MODEL; событие GLM_UNAVAILABLE в Web → Активность |
 | Бэкапы не появляются | Web → Активность → BACKUP_DONE; `df -h` |
