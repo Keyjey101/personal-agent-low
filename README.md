@@ -19,8 +19,9 @@ Web (администрирование) ┘        │
 
 ## Быстрый старт (VPS с nginx + Docker)
 
-На сервере уже есть nginx с TLS для `gmyrya.com` — приложение просто садится на `127.0.0.1:8080`,
-а nginx проксирует на него весь трафик (и интерфейс, и `/api` — это один сервис на одном порту).
+Приложение занимает хост-порты **3000 и 3001** (оба — только на localhost) и встаёт под
+существующий конфиг nginx для `gmyrya.com` без единой правки в нём: nginx уже ведёт
+`location /` на 3000 и `location /api/` на 3001 — оба порта замаплены в один контейнер.
 
 ```bash
 git clone git@github.com:Keyjey101/personal-agent-low.git && cd personal-agent-low
@@ -31,32 +32,13 @@ cp .env.example .env
 #   → вставь напечатанные WEB_PASSWORD_HASH и SESSION_SECRET в .env
 #   + заполни TELEGRAM_BOT_TOKEN, TELEGRAM_ALLOWED_CHAT_ID, GLM_API_KEY
 docker compose up -d
+curl -f http://localhost:3000/healthz        # {"ok":true,"db":true}
 ```
 
-nginx-конфиг для `/etc/nginx/sites-enabled/gmyrya.com` — блок `location /api/` не нужен,
-остальное меняешь на один location (сертификаты certbot не трогаем):
+Единственное условие: порты 3000/3001 на хосте должны быть свободны. Если там сейчас
+висит старое приложение (`ss -tlnp | grep -E '3000|3001'` покажет) — останови его:
+`docker stop <имя>` или `systemctl stop <сервис>`.
 
-```nginx
-server {
-    server_name gmyrya.com www.gmyrya.com;
-
-    location / {
-        proxy_pass http://127.0.0.1:8080;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_read_timeout 600s;
-        proxy_send_timeout 600s;
-        proxy_buffering off;
-    }
-
-    listen 443 ssl; # managed by Certbot
-    # ...остальные строки certbot (ssl_certificate и т.д.) остаются как были
-}
-```
-
-Проверка и применение: `nginx -t && systemctl reload nginx`.
 Открой `https://gmyrya.com` — там веб-панель; напиши боту `/start` в Telegram.
 При первом старте применятся миграции и зальются начальные данные (проекты из ТЗ).
 

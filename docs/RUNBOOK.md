@@ -3,12 +3,14 @@
 ## Архитектура деплоя
 
 ```text
-интернет → nginx (TLS, certbot, gmyrya.com) → 127.0.0.1:8080 → контейнер app (Docker)
+интернет → nginx (TLS, certbot, gmyrya.com) → 127.0.0.1:3000 (страницы) и :3001 (/api)
+                                                → оба порта → один контейнер app (Docker)
 ```
 
-Приложение одно и обслуживает всё: страницы, `/api/*`, `/healthz`. Отдельный `location /api/`
-в nginx не нужен. Наружу контейнер не проброшен — порт `8080` слушает только на localhost
-(`ports: "127.0.0.1:8080:8080"` в docker-compose).
+Приложение одно и обслуживает всё: страницы, `/api/*`, `/healthz`. Хост-порты **3000 и 3001**
+замаплены в один контейнер (`ports` в docker-compose) — это под существующий конфиг nginx
+(`location /` → 3000, `location /api/` → 3001), **nginx менять не нужно**. Наружу контейнер
+не проброшен: порты слушают только на localhost.
 
 ## Предпосылки
 
@@ -57,50 +59,28 @@ SESSION_SECRET=c29tZS1yYW5kb20t...
 
 ## Установка
 
+Порты 3000/3001 на хосте должны быть свободны. Если там висит старое приложение:
+
+```bash
+ss -tlnp | grep -E ':3000|:3001'    # кто занимает
+docker stop <имя> 2>/dev/null || systemctl stop <сервис>
+```
+
+Дальше:
+
 ```bash
 git clone git@github.com:Keyjey101/personal-agent-low.git && cd personal-agent-low
 cp .env.example .env
 # заполнить .env (см. таблицу выше)
 docker compose up -d --build
-curl -f http://localhost:8080/healthz        # {"ok":true,"db":true}
+curl -f http://localhost:3000/healthz        # {"ok":true,"db":true}
 ```
 
 ### nginx
 
-В `/etc/nginx/sites-enabled/gmyrya.com` замени проксирование: блок `location /api/ {...}`
-удаляем (он больше никуда не ведёт), `location /` ведём на 8080. Блоки certbot
-(ssl_certificate, listen 443 ssl, редирект 80→443) не трогаем. Итоговый server-блок:
-
-```nginx
-server {
-    server_name gmyrya.com www.gmyrya.com;
-
-    location / {
-        proxy_pass http://127.0.0.1:8080;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_read_timeout 600s;
-        proxy_send_timeout 600s;
-        proxy_buffering off;
-    }
-
-    listen 443 ssl; # managed by Certbot
-    ssl_certificate /etc/letsencrypt/live/gmyrya.com/fullchain.pem; # managed by Certbot
-    ssl_certificate_key /etc/letsencrypt/live/gmyrya.com/privkey.pem; # managed by Certbot
-    include /etc/letsencrypt/options-ssl-nginx.conf; # managed by Certbot
-    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem; # managed by Certbot
-}
-```
-
-Применение: `nginx -t && systemctl reload nginx`.
-
-Если на старых портах 3000/3001 жили другие приложения и они ещё нужны — они больше
-не доступны через gmyrya.com (весь домен теперь ведёт на Диспетчера); при необходимости
-раздай им другие поддомены.
-
-Проверка: `https://gmyrya.com` — страница входа; `/start` боту в Telegram.
+**Ничего менять не нужно**: текущий конфиг gmyrya.com уже ведёт `location /` на 3000,
+`location /api/` на 3001, а оба порта обслуживает Диспетчер. Сертификаты и certbot
+не трогаем.
 
 ## Обновление
 
@@ -125,7 +105,7 @@ docker compose stop app
 gunzip -c ./data/backups/app-2026-09-29.db.gz > ./data/app.db
 rm -f ./data/app.db-wal ./data/app.db-shm
 docker compose start app
-curl -f http://localhost:8080/healthz
+curl -f http://localhost:3000/healthz
 ```
 
 Процедуру обязательно прогнать на копии хотя бы раз (критерий приёмки №13 ТЗ).
@@ -134,7 +114,7 @@ curl -f http://localhost:8080/healthz
 
 | Симптом | Что смотреть |
 |---|---|
-| 502 на gmyrya.com | `docker compose ps` (app жив?), `curl -f http://localhost:8080/healthz` |
+| 502 на gmyrya.com | `docker compose ps` (app жив?), `curl -f http://localhost:3000/healthz`, свободны ли порты: `ss -tlnp | grep -E ':3000|:3001'` |
 | Бот молчит | `docker compose logs app`; проверь TELEGRAM_ALLOWED_CHAT_ID (чужие chat_id игнорируются с warn) |
 | «Мозг offline» в ответах | GLM_API_KEY / GLM_BASE_URL / GLM_MODEL; событие GLM_UNAVAILABLE в Web → Активность |
 | Бэкапы не появляются | Web → Активность → BACKUP_DONE; `df -h` |
