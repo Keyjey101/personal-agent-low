@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { api, UnauthorizedError } from './api';
+import { api } from './api';
 import { LoginPage } from './pages/Login';
 import { TodayPage } from './pages/Today';
 import { ProjectsPage } from './pages/Projects';
@@ -21,9 +21,11 @@ export function App() {
   const [authed, setAuthed] = useState<boolean | null>(null);
 
   useEffect(() => {
-    api('/api/state').then(() => setAuthed(true)).catch((e) => {
-      setAuthed(e instanceof UnauthorizedError);
-    });
+    api('/api/state').then(() => setAuthed(true)).catch(() => setAuthed(false));
+    // любая поздняя 401 (например, сессия истекла) возвращает на логин
+    const onUnauth = () => setAuthed(false);
+    window.addEventListener('app:unauthorized', onUnauth);
+    return () => window.removeEventListener('app:unauthorized', onUnauth);
   }, []);
 
   if (authed === null) return <div className="center">…</div>;

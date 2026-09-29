@@ -9,7 +9,10 @@ export async function api<T = unknown>(path: string, opts?: { method?: string; b
     body: opts?.body !== undefined ? JSON.stringify(opts.body) : undefined,
     credentials: 'same-origin',
   });
-  if (res.status === 401) throw new UnauthorizedError();
+  if (res.status === 401) {
+    window.dispatchEvent(new Event('app:unauthorized'));
+    throw new UnauthorizedError();
+  }
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
     throw new Error((data as any).error ?? `HTTP ${res.status}`);
