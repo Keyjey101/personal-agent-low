@@ -17,17 +17,47 @@ Web (администрирование) ┘        │
                                  └─→ SQLite (WAL): задачи, граф знаний, память, события
 ```
 
-## Быстрый старт (VPS с Docker)
+## Быстрый старт (VPS с nginx + Docker)
+
+На сервере уже есть nginx с TLS для `gmyrya.com` — приложение просто садится на `127.0.0.1:8080`,
+а nginx проксирует на него весь трафик (и интерфейс, и `/api` — это один сервис на одном порту).
 
 ```bash
 git clone git@github.com:Keyjey101/personal-agent-low.git && cd personal-agent-low
 cp .env.example .env
-npm run gen-secrets          # сгенерирует WEB_PASSWORD_HASH и SESSION_SECRET → в .env
-# заполни TELEGRAM_BOT_TOKEN, TELEGRAM_ALLOWED_CHAT_ID, GLM_API_KEY, DOMAIN
-docker compose up -d --build
+# ключи для .env:
+#   docker compose build app
+#   docker compose run --rm app node dist/scripts/gen-secrets.js   # спросит пароль для сайта
+#   → вставь напечатанные WEB_PASSWORD_HASH и SESSION_SECRET в .env
+#   + заполни TELEGRAM_BOT_TOKEN, TELEGRAM_ALLOWED_CHAT_ID, GLM_API_KEY
+docker compose up -d
 ```
 
-Открой `https://<домен>` — там веб-панель; напиши боту `/start` в Telegram.
+nginx-конфиг для `/etc/nginx/sites-enabled/gmyrya.com` — блок `location /api/` не нужен,
+остальное меняешь на один location (сертификаты certbot не трогаем):
+
+```nginx
+server {
+    server_name gmyrya.com www.gmyrya.com;
+
+    location / {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 600s;
+        proxy_send_timeout 600s;
+        proxy_buffering off;
+    }
+
+    listen 443 ssl; # managed by Certbot
+    # ...остальные строки certbot (ssl_certificate и т.д.) остаются как были
+}
+```
+
+Проверка и применение: `nginx -t && systemctl reload nginx`.
+Открой `https://gmyrya.com` — там веб-панель; напиши боту `/start` в Telegram.
 При первом старте применятся миграции и зальются начальные данные (проекты из ТЗ).
 
 ## Разработка
@@ -35,14 +65,14 @@ docker compose up -d --build
 ```bash
 npm install
 npm test        # unit + integration
-npm run dev     # локальный запуск (tsx watch), нужен .env
+npm run dev     # локальный запуск (tsx watch), нужен .env (кроме токенов — они нужны только для живого Telegram/GLM)
 npm run build   # tsc + vite build → dist/ + web-dist/
 npm start       # запуск собранного
 ```
 
 ## Стек
 
-TypeScript · Node 22 · Fastify · grammY · better-sqlite3 (WAL + FTS5) · Zod · GLM (OpenAI-совместимый API) · React + Vite · Docker Compose + Caddy.
+TypeScript · Node 24 · Fastify · grammY · node:sqlite (WAL + FTS5) · Zod · GLM (OpenAI-совместимый API) · React + Vite · Docker Compose за nginx.
 
 ## Отклонения от ТЗ (сознательные)
 

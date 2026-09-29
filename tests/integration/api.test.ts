@@ -25,7 +25,7 @@ async function setup(): Promise<{ app: FastifyInstance }> {
       TELEGRAM_BOT_TOKEN: 'x', TELEGRAM_ALLOWED_CHAT_ID: '', GLM_API_KEY: 'x',
       GLM_BASE_URL: 'http://localhost:1', GLM_MODEL: 'm', GLM_DAILY_TOKEN_LIMIT: 0,
       WEB_PASSWORD_HASH: await hash(PASSWORD, {}), SESSION_SECRET: 'test-secret-test-secret-test',
-      DOMAIN: '', TZ: 'Europe/Moscow', DATA_DIR: tmp, PORT: 0, LOG_LEVEL: 'info',
+      TZ: 'Europe/Moscow', DATA_DIR: tmp, PORT: 0, LOG_LEVEL: 'info',
     },
     repo, ops, settings, backup, log: createSilentLogger(),
   });

@@ -26,7 +26,7 @@ const SESSION_TTL_MS = 30 * 24 * 3_600_000;
 
 export async function buildHttpServer(deps: HttpDeps): Promise<FastifyInstance> {
   const { config, repo, ops, settings, backup, log } = deps;
-  const app = Fastify({ logger: false, bodyLimit: 1024 * 1024 });
+  const app = Fastify({ logger: false, bodyLimit: 1024 * 1024, trustProxy: true });
   await app.register(cookie, { secret: config.SESSION_SECRET });
 
   /* ---------- простенький rate-limit на логин ---------- */

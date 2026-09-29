@@ -9,7 +9,6 @@ const EnvSchema = z.object({
   GLM_DAILY_TOKEN_LIMIT: z.coerce.number().int().default(0),
   WEB_PASSWORD_HASH: z.string().min(1),
   SESSION_SECRET: z.string().min(16),
-  DOMAIN: z.string().default(''),
   TZ: z.string().default('Europe/Moscow'),
   DATA_DIR: z.string().default('./data'),
   PORT: z.coerce.number().default(8080),
