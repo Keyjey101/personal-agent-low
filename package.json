@@ -1,0 +1,38 @@
+{
+  "name": "dispatcher",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Диспетчер — персональный операционный помощник: Telegram + GLM + SQLite",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json && vite build",
+    "start": "node dist/src/index.js",
+    "test": "vitest run",
+    "gen-secrets": "tsx scripts/gen-secrets.ts"
+  },
+  "engines": {
+    "node": ">=23.4"
+  },
+  "dependencies": {
+    "@fastify/cookie": "^11.0.1",
+    "@fastify/static": "^8.0.3",
+    "@node-rs/argon2": "^2.0.2",
+    "fastify": "^5.2.1",
+    "grammy": "^1.35.0",
+    "openai": "^5.8.0",
+    "pino": "^9.6.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "@vitejs/plugin-react": "^4.3.4",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.7",
+    "vitest": "^3.0.5"
+  }
+}
