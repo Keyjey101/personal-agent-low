@@ -13,6 +13,10 @@ const EnvSchema = z.object({
   DATA_DIR: z.string().default('./data'),
   PORT: z.coerce.number().default(8080),
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
+  // ночная рефлексия: упаковка событий в память + обогащение графа
+  REFLECTOR_ENABLED: z.string().default('1').transform((v) => !['0', 'false', 'no', 'off'].includes(v.toLowerCase())),
+  REFLECTOR_HOUR: z.coerce.number().int().min(0).max(23).default(4),
+  REFLECTOR_MAX_EVENTS: z.coerce.number().int().min(10).max(1000).default(200),
 });
 
 export type AppConfig = z.infer<typeof EnvSchema>;

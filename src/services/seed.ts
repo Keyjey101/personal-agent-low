@@ -39,9 +39,10 @@ export function ensureSeed(repo: Repo): boolean {
   const stPhoto = T({ project_id: sellTable.id, title: 'Сфотографировать массажный стол', estimated_minutes: 15, energy_required: 1, status: 'next' });
   const stPrice = T({ project_id: sellTable.id, title: 'Определить цену (посмотреть 5–10 объявлений)', estimated_minutes: 20, energy_required: 2 });
   const stAd = T({ project_id: sellTable.id, title: 'Написать и выложить объявление на Авито', estimated_minutes: 20, energy_required: 2 });
-  T({ project_id: sellTable.id, title: 'Отвечать покупателям', estimated_minutes: 10, energy_required: 1 });
+  const stAnswer = T({ project_id: sellTable.id, title: 'Отвечать покупателям', estimated_minutes: 10, energy_required: 1 });
   repo.addTaskEdge(stPrice.id, stPhoto.id, 'requires', now);
   repo.addTaskEdge(stAd.id, stPrice.id, 'requires', now);
+  repo.addTaskEdge(stAnswer.id, stAd.id, 'requires', now); // до публикации объявления рано отвечать покупателям
 
   // Покупка стола
   const ntReq = T({ project_id: buyTable.id, title: 'Сформулировать требования (размер, вес, бюджет)', estimated_minutes: 10, energy_required: 1, status: 'next' });

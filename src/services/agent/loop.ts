@@ -9,13 +9,12 @@ import { buildTools, ToolCtx, ToolDef } from './tools';
 import { buildContext } from './context';
 import { FORCE_REPLY_NUDGE, REPAIR_NUDGE, SYSTEM_PROMPT } from './prompts';
 import { GlmLimitError, GlmUnavailableError } from '../../domain/errors';
+import { shortLocal } from '../../domain/time';
 import type { Logger } from 'pino';
 
 const MAX_ROUNDS = 3;
 
 export interface TurnResult { text: string; proposeTaskId: number | null; fallback: boolean }
-
-interface PlannedOp { tool: ToolDef; args: unknown }
 
 /**
  * Цикл агента (ТЗ 7.1): контекст → GLM → валидация tools → единая
@@ -43,13 +42,20 @@ export class AgentLoop {
   }
 
   async handleUserTurn(userText: string): Promise<TurnResult> {
+    // время прошлого сообщения считаем ДО записи нового — для «сколько прошло»
+    const prevUserMessageAt = this.deps.repo.lastUserMessageAt();
     const nowIso = this.deps.clock.now().toISOString();
     this.deps.repo.addEvent('USER_MESSAGE', { text: userText }, nowIso);
 
+    const tz = this.deps.settings.tz();
     const history = this.deps.repo.dialog(12);
     const messages: LlmMessage[] = [
-      { role: 'system', content: SYSTEM_PROMPT + '\n\n' + buildContext(userText, this.deps) },
-      ...history.slice(0, -1).map((e) => ({ role: e.type === 'USER_MESSAGE' ? 'user' as const : 'assistant' as const, content: e.text ?? '' })),
+      { role: 'system', content: SYSTEM_PROMPT + '\n\n' + buildContext(userText, this.deps, prevUserMessageAt) },
+      ...history.slice(0, -1).map((e) => ({
+        role: e.type === 'USER_MESSAGE' ? 'user' as const : 'assistant' as const,
+        // метка времени у каждого сообщения — модель видит, когда что было
+        content: `[${shortLocal(e.ts, tz)}] ${e.text ?? ''}`,
+      })),
       { role: 'user', content: userText },
     ];
 
@@ -68,7 +74,7 @@ export class AgentLoop {
 
   private async runRounds(messages: LlmMessage[]): Promise<TurnResult> {
     const ctx = this.ctx();
-    const planned: PlannedOp[] = [];
+    const allOps: string[] = [];
     let replyPlan: { text: string; propose_task_id?: number } | null = null;
     let finalText: string | null = null;
 
@@ -86,6 +92,7 @@ export class AgentLoop {
       }
 
       let hadError = false;
+      const roundPlanned: { tool: ToolDef; args: unknown }[] = [];
       for (const call of toolCalls) {
         const tool = this.toolMap.get(call.name);
         if (!tool) {
@@ -126,9 +133,22 @@ export class AgentLoop {
             hadError = true;
             messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify({ error: err }) });
           } else {
-            planned.push({ tool, args: parsed.data });
+            roundPlanned.push({ tool, args: parsed.data });
             messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify({ ok: true, queued: 'применю после твоего финального ответа' }) });
           }
+        }
+      }
+
+      // валидные write-операции раунда применяем сразу, транзакционно:
+      // следующие раунды (и валидация цепочек create→link) видят результат
+      if (roundPlanned.length) {
+        const applied = await this.applyOps(roundPlanned, ctx);
+        if (applied === null) {
+          replyPlan = replyPlan
+            ? { ...replyPlan, text: replyPlan.text + '\n\n⚠️ Не всё удалось сохранить — изменения раунда откачены.' }
+            : { text: '⚠️ Не удалось сохранить изменения. Попробуй ещё раз.' };
+        } else {
+          allOps.push(...applied);
         }
       }
 
@@ -146,34 +166,36 @@ export class AgentLoop {
       }
     }
 
-    // применение write-операций одной транзакцией
-    if (planned.length) {
-      await this.deps.lock.run(async () => {
-        try {
-          this.deps.repo.transaction(() => {
-            for (const op of planned) {
-              this.deps.repo.addEvent('TOOL_CALL', { payload: { tool: op.tool.name } }, this.deps.clock.now().toISOString());
-              op.tool.apply!(op.args, ctx);
-            }
-          });
-        } catch (e) {
-          this.deps.log.error({ err: (e as Error).stack }, 'apply planned ops failed (rolled back)');
-          this.deps.repo.addEvent('SYSTEM_ERROR', { text: `Транзакция хода откачена: ${(e as Error).message}` }, this.deps.clock.now().toISOString());
-          replyPlan = replyPlan
-            ? { ...replyPlan, text: replyPlan.text + '\n\n⚠️ Не всё удалось сохранить — данные не изменены.' }
-            : { text: '⚠️ Не удалось сохранить изменения. Попробуй ещё раз.' };
-        }
-      });
-    }
-
     const outText = replyPlan?.text ?? finalText ?? '';
     if (!outText) return this.deterministicFallback('пустой ответ модели');
 
     this.deps.repo.addEvent('AGENT_MESSAGE', {
       text: outText,
-      payload: { propose_task_id: replyPlan?.propose_task_id ?? null, planned_ops: planned.map((p) => p.tool.name) },
+      payload: { propose_task_id: replyPlan?.propose_task_id ?? null, planned_ops: allOps },
     }, this.deps.clock.now().toISOString());
     return { text: outText, proposeTaskId: replyPlan?.propose_task_id ?? null, fallback: false };
+  }
+
+  /** Применить пакет write-операций одной транзакцией; null = откат с ошибкой. */
+  private async applyOps(ops: { tool: ToolDef; args: unknown }[], ctx: ToolCtx): Promise<string[] | null> {
+    const names: string[] = [];
+    const failed = await this.deps.lock.run(async () => {
+      try {
+        this.deps.repo.transaction(() => {
+          for (const op of ops) {
+            this.deps.repo.addEvent('TOOL_CALL', { payload: { tool: op.tool.name } }, this.deps.clock.now().toISOString());
+            op.tool.apply!(op.args, ctx);
+            names.push(op.tool.name);
+          }
+        });
+        return false;
+      } catch (e) {
+        this.deps.log.error({ err: (e as Error).stack }, 'apply ops failed (rolled back)');
+        this.deps.repo.addEvent('SYSTEM_ERROR', { text: `Транзакция раунда откачена: ${(e as Error).message}` }, this.deps.clock.now().toISOString());
+        return true;
+      }
+    });
+    return failed ? null : names;
   }
 
   /** GLM недоступен — детерминированный ответ по скорингу (ТЗ 7.6). */

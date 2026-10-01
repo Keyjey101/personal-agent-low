@@ -15,6 +15,7 @@ import { Scheduler } from './services/scheduler';
 import { TgBot } from './infra/telegram/bot';
 import { buildHttpServer } from './infra/http/server';
 import { ensureSeed } from './services/seed';
+import { Reflector } from './services/reflector';
 import { systemClock } from './clock';
 
 async function main(): Promise<void> {
@@ -50,7 +51,13 @@ async function main(): Promise<void> {
   const loop: AgentLoop = new AgentLoop({ llm, repo, ops, settings, sessions, clock, lock, log: logger });
   const engine = new ProactiveEngine({ repo, ops, settings, llm, clock, log: logger, sender: (text, tid) => bot.sendToUser(text, tid) });
   const backup = new BackupService(db, repo, config.DATA_DIR, () => settings.tz(), clock, logger);
-  const scheduler = new Scheduler({ clock, repo, settings, engine, sessions, backup, lock, log: logger });
+  const reflector = new Reflector({ llm, repo, ops, settings, clock, lock, log: logger });
+  const scheduler = new Scheduler({
+    clock, repo, settings, engine, sessions, backup, reflector, lock, log: logger,
+    reflectorEnabled: config.REFLECTOR_ENABLED,
+    reflectorHour: config.REFLECTOR_HOUR,
+    reflectorMaxEvents: config.REFLECTOR_MAX_EVENTS,
+  });
 
   /* ---------- HTTP ---------- */
   const server = await buildHttpServer({ config, repo, ops, settings, backup, log: logger });

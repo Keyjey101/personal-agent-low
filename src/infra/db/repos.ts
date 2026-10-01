@@ -455,6 +455,15 @@ export class Repo {
     return r.m ?? null;
   }
 
+  /** Последняя проактивная отправка за последние N часов — для интервала между сообщениями. */
+  lastProactiveSentAt(withinHours = 24): string | null {
+    const since = new Date(Date.now() - withinHours * 3_600_000).toISOString();
+    const r = this.db.prepare(
+      "SELECT MAX(ts) m FROM events WHERE type = 'PROACTIVE_SENT' AND ts >= ?",
+    ).get(since) as Row;
+    return r.m ?? null;
+  }
+
   /** Статистика проактивных отправок за день (для бюджетов). */
   proactiveStats(todayStartIso: string, workWindow: { start: string; end: string } | null): {
     nonCriticalToday: number; criticalWorkToday: number; lastSentAt: string | null;

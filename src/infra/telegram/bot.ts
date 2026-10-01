@@ -103,6 +103,8 @@ export class TgBot {
       const tz = settings.tz();
       const p = localParts(t, tz);
       const completedToday = repo.countTypeSince('TASK_COMPLETED', todayStartIso(t, tz));
+      const proactiveToday = repo.countTypeSince('PROACTIVE_SENT', todayStartIso(t, tz));
+      const lastSup = repo.listEvents({ type: 'PROACTIVE_SUPPRESSED', limit: 1 })[0];
       const counts = repo.openCounts();
       const projects = repo.listProjects('active')
         .map((pr) => `• ${htmlEscape(pr.name)} — ${counts.get(pr.id) ?? 0} откр.`)
@@ -113,8 +115,9 @@ export class TgBot {
         : 'не сообщал';
       const session = repo.activeSession();
       ctx.reply(
-        `<b>${p.dateStr} ${String(p.hh).padStart(2, '0')}:${String(p.mm).padStart(2, '0')}</b>\n` +
+        `<b>${p.dateStr} ${String(p.hh).padStart(2, '0')}:${String(p.mm).padStart(2, '0')}</b> (серверное время, tz ${htmlEscape(tz)})\n` +
         `Сегодня сделано: ${completedToday}\nСостояние: ${htmlEscape(stateStr)}\n` +
+        `Проактивных сегодня: ${proactiveToday}${lastSup ? `\nПоследнее подавление: ${htmlEscape(String(lastSup.payload.reason ?? ''))} в ${htmlEscape(lastSup.ts.slice(11, 16))} UTC` : ''}\n` +
         (session ? `Сессия «веди меня» до ${session.ends_at.slice(11, 16)} UTC\n` : '') +
         `\n<b>Проекты:</b>\n${projects}`,
         { parse_mode: 'HTML' },

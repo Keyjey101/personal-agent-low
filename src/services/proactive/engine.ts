@@ -5,7 +5,7 @@ import { LlmClient } from '../../infra/llm/glm';
 import { Clock } from '../../clock';
 import { localParts, todayStartIso, workWindowIso } from '../../domain/time';
 import { evaluateCondition } from '../../domain/reminders';
-import { ProactiveCandidate, checkSendWindow, evalRules, registerIgnoreIfStale, registerReaction, registerSend, topicAllowed } from '../../domain/proactivity';
+import { ProactiveCandidate, checkSendWindow, evalRules, registerIgnoreIfStale, registerReaction, registerSend, topicAllowed, isProjectStale, projectStaleDays } from '../../domain/proactivity';
 import { PROACTIVE_SYSTEM } from '../agent/prompts';
 import type { Logger } from 'pino';
 
@@ -97,11 +97,17 @@ export class ProactiveEngine {
       .filter((t) => t.due_at);
     const completedToday = repo.countTypeSince('TASK_COMPLETED', todayStartIso(now, tz));
     const counts = repo.openCounts();
-    const staleProjects = repo.listProjects('active')
-      .filter((pr) => (counts.get(pr.id) ?? 0) > 0)
-      .map((pr) => ({ id: pr.id, name: pr.name, lastCompletedAt: repo.lastCompletedAtForProject(pr.id) }))
-      .filter((pr) => !pr.lastCompletedAt ||
-        now.getTime() - new Date(pr.lastCompletedAt).getTime() >= cfg.staleProjectDays * 86_400_000);
+    const staleProjects: { id: number; name: string; lastCompletedAt: string | null; daysStale: number }[] = [];
+    for (const pr of repo.listProjects('active')) {
+      if ((counts.get(pr.id) ?? 0) === 0) continue;
+      const last = repo.lastCompletedAtForProject(pr.id);
+      if (isProjectStale(pr.created_at, last, now, cfg.staleProjectDays)) {
+        staleProjects.push({
+          id: pr.id, name: pr.name, lastCompletedAt: last,
+          daysStale: projectStaleDays(pr.created_at, last, now),
+        });
+      }
+    }
 
     const cands = evalRules({
       now, tz, todayLocal: p.dateStr, cfg,
@@ -176,7 +182,12 @@ export class ProactiveEngine {
     const stats = repo.proactiveStats(todayStartIso(now, tz), inWork(now, tz, cfg) ? workWindowIso(now, tz, cfg.work.start, cfg.work.end) : null);
     return checkSendWindow({
       now, tz, cfg, critical,
-      stats: { nonCriticalToday: stats.nonCriticalToday, criticalWorkToday: stats.criticalWorkToday, lastSentAt: stats.lastSentAt },
+      stats: {
+        nonCriticalToday: stats.nonCriticalToday,
+        criticalWorkToday: stats.criticalWorkToday,
+        // интервал считаем за 24 часа, а не «с начала дня»: иначе после полуночи лимит обнулялся
+        lastSentAt: repo.lastProactiveSentAt(24),
+      },
       sessionActive: !!repo.activeSession(),
       lastUserMessageAt: repo.lastUserMessageAt(),
     });

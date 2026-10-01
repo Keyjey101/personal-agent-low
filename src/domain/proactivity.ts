@@ -142,6 +142,22 @@ export interface ProactiveCandidate {
   projectId?: number;
 }
 
+/**
+ * Проект «застоялся»: нет завершённых задач дольше staleDays.
+ * Если завершений не было вообще — считаем от создания проекта,
+ * а не «бесконечность» (иначе свежий проект сразу выглядит брошенным).
+ */
+export function isProjectStale(createdIso: string, lastCompletedAt: string | null, now: Date, staleDays: number): boolean {
+  const base = lastCompletedAt && lastCompletedAt > createdIso ? lastCompletedAt : createdIso;
+  return now.getTime() - new Date(base).getTime() >= staleDays * 86_400_000;
+}
+
+/** Сколько дней проект без продвижения (для честного текста сообщения). */
+export function projectStaleDays(createdIso: string, lastCompletedAt: string | null, now: Date): number {
+  const base = lastCompletedAt && lastCompletedAt > createdIso ? lastCompletedAt : createdIso;
+  return Math.floor((now.getTime() - new Date(base).getTime()) / 86_400_000);
+}
+
 export interface RuleInput {
   now: Date;
   tz: string;
@@ -150,7 +166,7 @@ export interface RuleInput {
   tasks: Task[];                      // открытые задачи с due_at
   candidates: Ranked[];               // ранжированные действия
   completedToday: number;
-  staleProjects: { id: number; name: string; lastCompletedAt: string | null }[];
+  staleProjects: { id: number; name: string; lastCompletedAt: string | null; daysStale?: number }[];
 }
 
 export function evalRules(input: RuleInput): ProactiveCandidate[] {
@@ -197,9 +213,10 @@ export function evalRules(input: RuleInput): ProactiveCandidate[] {
     }
     // 4. stale_project: проект без прогресса N дней
     for (const pr of staleProjects) {
+      const days = pr.daysStale ?? cfg.staleProjectDays;
       out.push({
         key: `stale:${pr.id}`, topic: `stale:${pr.id}`, critical: false, minLevel: 2,
-        hint: `Проект «${pr.name}» без продвижения больше ${cfg.staleProjectDays} дней.`,
+        hint: `Проект «${pr.name}» без продвижения уже ${days} дн.`,
         projectId: pr.id,
       });
     }

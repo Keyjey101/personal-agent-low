@@ -347,15 +347,93 @@ export function buildTools(): ToolDef[] {
         kind: z.enum(['preference', 'fact', 'insight', 'routine', 'pattern']),
         content: z.string().min(3),
         confidence: z.number().min(0).max(1).optional(),
+        source: z.enum(['user', 'reflector']).optional(),
       }).strict(),
       jsonSchema: obj({
         kind: { type: 'string', enum: ['preference', 'fact', 'insight', 'routine', 'pattern'] },
         content: str('мысль по-русски, одна, без markdown'),
         confidence: num('0–1'),
+        source: { type: 'string', enum: ['user', 'reflector'], description: 'reflector — если это вывод ночной рефлексии' },
       }, ['kind', 'content']),
       apply: (a, ctx) => {
-        const m = ctx.repo.insertMemory({ kind: a.kind, content: a.content, source: 'user_told', confidence: a.confidence }, new Date().toISOString());
+        const m = ctx.repo.insertMemory({
+          kind: a.kind, content: a.content,
+          source: a.source === 'reflector' ? 'agent_observed' : 'user_told',
+          confidence: a.confidence,
+        }, new Date().toISOString());
         return { id: m.id };
+      },
+    },
+    {
+      name: 'forget_memory',
+      description: 'Деактивировать устаревшую запись памяти (после того, как записана новая версия).',
+      kind: 'write',
+      schema: z.object({ id: z.number().int() }).strict(),
+      jsonSchema: obj({ id: num('ID записи памяти') }, ['id']),
+      validate: (a, ctx) => (ctx.repo.listMemory(false).some((m) => m.id === a.id) ? null : `Запись памяти ${a.id} не найдена`),
+      apply: (a, ctx) => {
+        ctx.repo.setMemoryActive(a.id, false, new Date().toISOString());
+        return { id: a.id, forgotten: true };
+      },
+    },
+    {
+      name: 'add_entity',
+      description: 'Добавить объект/место/концепт в граф знаний (если такого ещё нет).',
+      kind: 'write',
+      schema: z.object({
+        kind: z.enum(['object', 'place', 'person', 'concept', 'habit', 'equipment']),
+        name: z.string().min(1),
+        description: z.string().optional(),
+      }).strict(),
+      jsonSchema: obj({
+        kind: { type: 'string', enum: ['object', 'place', 'person', 'concept', 'habit', 'equipment'] },
+        name: str('название'), description: str('пояснение'),
+      }, ['kind', 'name']),
+      apply: (a, ctx) => {
+        const id = ctx.repo.upsertEntity(a, new Date().toISOString());
+        return { id };
+      },
+    },
+    {
+      name: 'add_entity_edge',
+      description: 'Связь между сущностями графа знаний (по именам).',
+      kind: 'write',
+      schema: z.object({
+        from: z.string().min(1),
+        to: z.string().min(1),
+        relation: z.enum(['located_at', 'contains', 'requires', 'related_to', 'part_of', 'belongs_to', 'affects']),
+      }).strict(),
+      jsonSchema: obj({
+        from: str('имя сущности-источника'), to: str('имя сущности-цели'),
+        relation: { type: 'string', enum: ['located_at', 'contains', 'requires', 'related_to', 'part_of', 'belongs_to', 'affects'] },
+      }, ['from', 'to', 'relation']),
+      validate: (a, ctx) => {
+        if (!ctx.repo.getEntity(a.from)) return `Сущность «${a.from}» не найдена (сначала add_entity)`;
+        if (!ctx.repo.getEntity(a.to)) return `Сущность «${a.to}» не найдена (сначала add_entity)`;
+        return null;
+      },
+      apply: (a, ctx) => {
+        const from = ctx.repo.getEntity(a.from)!;
+        const to = ctx.repo.getEntity(a.to)!;
+        ctx.repo.addEntityEdge(from.id, to.id, a.relation, new Date().toISOString());
+        return { ok: true };
+      },
+    },
+    {
+      name: 'link_task_entity',
+      description: 'Привязать задачу к сущности графа знаний (о чём эта задача).',
+      kind: 'write',
+      schema: z.object({ task_id: z.number().int(), entity_name: z.string().min(1) }).strict(),
+      jsonSchema: obj({ task_id: num('ID задачи'), entity_name: str('имя сущности') }, ['task_id', 'entity_name']),
+      validate: (a, ctx) => {
+        if (!ctx.repo.getTask(a.task_id)) return `Задача ${a.task_id} не найдена`;
+        if (!ctx.repo.getEntity(a.entity_name)) return `Сущность «${a.entity_name}» не найдена (сначала add_entity)`;
+        return null;
+      },
+      apply: (a, ctx) => {
+        const e = ctx.repo.getEntity(a.entity_name)!;
+        ctx.repo.linkTaskEntity(a.task_id, e.id);
+        return { ok: true };
       },
     },
     {

@@ -79,6 +79,12 @@ export function daysBetween(fromIso: string, toNow: Date): number {
   return Math.floor((toNow.getTime() - new Date(fromIso).getTime()) / 86_400_000);
 }
 
+/** Короткое локальное время для меток в диалоге: '30.09 07:01'. */
+export function shortLocal(iso: string, tz: string): string {
+  const p = localParts(new Date(iso), tz);
+  return `${String(p.d).padStart(2, '0')}.${String(p.m).padStart(2, '0')} ${String(p.hh).padStart(2, '0')}:${String(p.mm).padStart(2, '0')}`;
+}
+
 export function isWorkday(weekday: Weekday, days: string[]): boolean {
   return days.includes(weekday);
 }

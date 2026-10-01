@@ -5,6 +5,7 @@ import { Settings } from './settings';
 import { ProactiveEngine } from './proactive/engine';
 import { SessionService } from './session';
 import { BackupService } from './backup';
+import { Reflector } from './reflector';
 import { localParts, todayStartIso } from '../domain/time';
 import type { Logger } from 'pino';
 
@@ -19,7 +20,9 @@ export class Scheduler {
 
   constructor(private deps: {
     clock: Clock; repo: Repo; settings: Settings; engine: ProactiveEngine;
-    sessions: SessionService; backup: BackupService; lock: WriteLock; log: Logger;
+    sessions: SessionService; backup: BackupService; reflector: Reflector;
+    lock: WriteLock; log: Logger;
+    reflectorEnabled: boolean; reflectorHour: number; reflectorMaxEvents: number;
   }) {}
 
   start(): void {
@@ -52,11 +55,20 @@ export class Scheduler {
     const { clock, repo, settings } = this.deps;
     const now = clock.now();
     const p = localParts(now, settings.tz());
-    if (p.hm < BACKUP_AT_HM) return;
-    if (this.backupDoneFor === p.dateStr) return;
-    const already = repo.listEvents({ type: 'BACKUP_DONE', since: todayStartIso(now, settings.tz()), limit: 1 });
-    if (already.length) { this.backupDoneFor = p.dateStr; return; }
-    await this.deps.backup.run();
-    this.backupDoneFor = p.dateStr;
+
+    if (p.hm >= BACKUP_AT_HM && this.backupDoneFor !== p.dateStr) {
+      const already = repo.listEvents({ type: 'BACKUP_DONE', since: todayStartIso(now, settings.tz()), limit: 1 });
+      if (already.length) {
+        this.backupDoneFor = p.dateStr;
+      } else {
+        await this.deps.backup.run();
+        this.backupDoneFor = p.dateStr;
+      }
+    }
+
+    // ночная рефлексия: упаковка памяти и обогащение графа
+    if (this.deps.reflectorEnabled) {
+      await this.deps.reflector.runIfNeeded(this.deps.reflectorHour, this.deps.reflectorMaxEvents);
+    }
   }
 }

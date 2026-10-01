@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  ProactiveCfg, backoffDays, checkSendWindow, evalRules, registerIgnoreIfStale,
-  registerMute, registerReaction, registerSend, topicAllowed,
+  ProactiveCfg, backoffDays, checkSendWindow, evalRules, isProjectStale, projectStaleDays,
+  registerIgnoreIfStale, registerMute, registerReaction, registerSend, topicAllowed,
 } from '../../src/domain/proactivity';
 import { Ranked, Task } from '../../src/domain/types';
 
@@ -100,6 +100,22 @@ describe('backoff и муты', () => {
     expect(st.ignoreCount).toBe(1);
     st = registerReaction(st);
     expect(st.ignoreCount).toBe(0);
+  });
+});
+
+describe('stale-проекты', () => {
+  const NOW = new Date('2026-10-01T10:00:00Z');
+  it('проект без завершений считается от создания, а не «вечно»', () => {
+    const fresh = new Date(NOW.getTime() - 2 * 86_400_000).toISOString();
+    const old = new Date(NOW.getTime() - 15 * 86_400_000).toISOString();
+    expect(isProjectStale(fresh, null, NOW, 10)).toBe(false);   // создан 2 дня назад — не «стоит 10 дней»
+    expect(isProjectStale(old, null, NOW, 10)).toBe(true);
+    expect(projectStaleDays(old, null, NOW)).toBe(15);
+  });
+  it('после завершения счётчик обнуляется', () => {
+    const created = new Date(NOW.getTime() - 15 * 86_400_000).toISOString();
+    const lastDone = new Date(NOW.getTime() - 3 * 86_400_000).toISOString();
+    expect(isProjectStale(created, lastDone, NOW, 10)).toBe(false);
   });
 });
 
