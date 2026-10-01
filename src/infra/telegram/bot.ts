@@ -7,7 +7,11 @@ import { AgentLoop } from '../../services/agent/loop';
 import { Ranked } from '../../domain/types';
 import { localParts, todayStartIso } from '../../domain/time';
 import { registerMute } from '../../domain/proactivity';
+import { htmlEscape } from './escape';
+import { sessionIntent } from './session-words';
 import type { Logger } from 'pino';
+
+export { htmlEscape };
 
 export interface TgBotDeps {
   token: string;
@@ -18,10 +22,6 @@ export interface TgBotDeps {
   getLoop: () => AgentLoop;
   getSessions: () => SessionService;
   log: Logger;
-}
-
-export function htmlEscape(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 const HELP = `Я — <b>Диспетчер</b>. Твой внешний исполнительный контур.
@@ -55,10 +55,10 @@ export class TgBot {
 
   async start(): Promise<void> {
     await this.bot.init();
-    // long polling в фоне; не блокируем запуск сервера
+    // long polling в фоне; не блокируем запуск сервера.
+    // drop_pending_updates НЕ включаем: сообщения, пришедшие во время простоя, важны.
     void this.bot.start({
       onStart: () => this.deps.log.info('telegram polling started'),
-      drop_pending_updates: true,
     }).catch((e) => this.deps.log.error({ err: e.message }, 'telegram polling crashed'));
   }
 
@@ -133,25 +133,30 @@ export class TgBot {
       ctx.reply(formatProposal(top), { parse_mode: 'HTML', reply_markup: actionKeyboard(top.task.id) });
     });
 
-    bot.command('done', (ctx) => {
+    bot.command('done', async (ctx) => {
       const arg = ctx.match?.trim();
       const session = repo.activeSession();
       const id = arg ? parseInt(arg, 10) : session?.current_task_id ?? currentActiveTaskId(repo);
       if (!id || Number.isNaN(id)) {
-        ctx.reply('Не понял, что именно завершено. Укажи ID: /done 12 — или ответь кнопкой ✅.');
+        await ctx.reply('Не понял, что именно завершено. Укажи ID: /done 12 — или ответь кнопкой ✅.');
         return;
       }
       try {
+        // если это текущая задача сессии — закрываем через сессию, чтобы она выдала следующее
+        if (session && session.current_task_id === id) {
+          const ok = await deps.getSessions().doneExternal(id);
+          if (ok) return;
+        }
         const r = ops.completeTask(id);
-        const extra = r.newInstance ? `\n(создан следующий экземпляр: ${r.newInstance.title}, до ${r.newInstance.due_at})` : '';
+        const extra = r.newInstance ? `\n(создан следующий экземпляр: ${htmlEscape(r.newInstance.title)}, до ${r.newInstance.due_at})` : '';
         const next = ops.topAction();
         const nextStr = next ? `\n\nДальше:\n${formatProposal(next)}` : '\n\nЭто было последнее подходящее действие. Красава.';
-        void ctx.reply(`✅ ${htmlEscape(r.task.title)} — закрыто.${extra}${nextStr}`, {
+        await ctx.reply(`✅ ${htmlEscape(r.task.title)} — закрыто.${extra}${nextStr}`, {
           parse_mode: 'HTML',
           ...(next ? { reply_markup: actionKeyboard(next.task.id) } : {}),
         });
       } catch (e) {
-        ctx.reply(`Не вышло: ${(e as Error).message}`);
+        await ctx.reply(`Не вышло: ${htmlEscape((e as Error).message)}`).catch(() => undefined);
       }
     });
 
@@ -191,18 +196,24 @@ export class TgBot {
     bot.on('message:text', (ctx) => {
       const text = ctx.message.text.trim();
       const s = repo.activeSession();
+      const log = this.deps.log;
 
-      if (s && /^(готово|сделал|сделал\.|done|закончил|всё|все)\b/i.test(text)) {
-        void deps.getSessions().doneCurrent().then((ok) => { if (!ok) void this.handleTurn(ctx, text); });
-        return;
-      }
-      if (s && /^(другое|дальше|skip|следующее)\b/i.test(text)) {
-        void deps.getSessions().skipCurrent();
-        return;
-      }
-      if (s && /^(стоп|хватит|останови)\b/i.test(text)) {
-        void deps.getSessions().end('по слову «стоп»');
-        return;
+      if (s) {
+        const intent = sessionIntent(text);
+        if (intent === 'done') {
+          void deps.getSessions().doneCurrent()
+            .then((ok) => { if (!ok) return this.handleTurn(ctx, text); })
+            .catch((e) => log.error({ err: (e as Error).stack }, 'session done failed'));
+          return;
+        }
+        if (intent === 'skip') {
+          void deps.getSessions().skipCurrent().catch((e) => log.error({ err: (e as Error).stack }, 'session skip failed'));
+          return;
+        }
+        if (intent === 'stop') {
+          void deps.getSessions().end('по слову «стоп»').catch((e) => log.error({ err: (e as Error).stack }, 'session stop failed'));
+          return;
+        }
       }
       if (/^\/\w+/.test(text)) { ctx.reply('Не знаю такую команду. /help'); return; }
       void this.handleTurn(ctx, text);
@@ -229,23 +240,27 @@ export class TgBot {
     const task = repo.getTask(taskId);
     try {
       if (action === 'done') {
+        const alreadyDone = !task || task.status === 'done';
+        if (alreadyDone) {
+          // повторное нажатие / старое сообщение — тихо подтверждаем, ничего не шлём
+          await ctx.answerCallbackQuery({ text: 'Уже закрыто ✅' }).catch(() => undefined);
+          return;
+        }
         const session = repo.activeSession();
-        try {
-          ops.completeTask(taskId);
-        } catch { /* уже закрыта — не страшно */ }
+        await ctx.answerCallbackQuery({ text: 'Закрыто ✅' }).catch(() => undefined);
         if (session && session.current_task_id === taskId) {
           await this.deps.getSessions().doneExternal(taskId);
           return;
         }
+        ops.completeTask(taskId);
         const next = ops.topAction();
-        await ctx.answerCallbackQuery({ text: 'Закрыто ✅' });
         await this.sendToUser(
           next ? `Следующее:\n${formatProposal(next)}` : 'Отлично. Больше подходящих задач нет.',
           next?.task.id ?? null,
         );
       } else if (action === 'later') {
-        ops.snoozeSuggestion(taskId, 1);
-        await ctx.answerCallbackQuery({ text: 'Отложил на день' });
+        await ctx.answerCallbackQuery({ text: 'Отложил на день' }).catch(() => undefined);
+        if (task && task.status !== 'done') ops.snoozeSuggestion(taskId, 1);
         const alt = ops.topAction([taskId]);
         if (alt && alt.task.id !== taskId) {
           await this.sendToUser(`Тогда другое:\n${formatProposal(alt)}`, alt.task.id);
@@ -253,7 +268,9 @@ export class TgBot {
           await this.sendToUser('Ок, вернусь к этому завтра.');
         }
       } else if (action === 'other') {
-        await ctx.answerCallbackQuery({});
+        await ctx.answerCallbackQuery({}).catch(() => undefined);
+        // полчаса тишины по этой задаче — иначе «Другое» пинг-понгит A↔B
+        if (task && task.status !== 'done') ops.snoozeFor(taskId, 30);
         const alt = ops.topAction([taskId]);
         if (alt && alt.task.id !== taskId) {
           await this.sendToUser(`Другое:\n${formatProposal(alt)}`, alt.task.id);
@@ -261,15 +278,15 @@ export class TgBot {
           await this.sendToUser('Других подходящих вариантов нет под текущее состояние.');
         }
       } else if (action === 'no') {
-        ops.rejectSuggestion(taskId);
-        // мут тем этой задачи, чтобы не доставать
+        await ctx.answerCallbackQuery({ text: 'Понял' }).catch(() => undefined);
+        if (task) ops.rejectSuggestion(taskId);
+        // мутим только темы-правила, связанные с задачей; дедлайны не мутятся
         const cfg = settings.proactiveCfg();
         const state = settings.proactiveState();
-        for (const topic of ['evening', ...(task?.project_id ? [`stale:${task.project_id}`] : [])]) {
+        for (const topic of ['evening', 'weekend', ...(task?.project_id ? [`stale:${task.project_id}`] : [])]) {
           settings.setProactiveTopic(topic, registerMute(state[topic], new Date(), cfg));
         }
-        await ctx.answerCallbackQuery({ text: 'Понял, не беспокою' });
-        await this.sendToUser('Ок. Эту линию заморозил на неделю.');
+        await this.sendToUser('Ок, эту линию заморозил на неделю. Дедлайны всё равно напомню.');
       }
     } catch (e) {
       this.deps.log.error({ err: (e as Error).stack }, 'callback failed');

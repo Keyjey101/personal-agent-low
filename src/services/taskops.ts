@@ -135,6 +135,13 @@ export class TaskOps {
     this.repo.addEvent('SUGGESTION_SNOOZED', { taskId, payload: { until, days } }, this.now());
   }
 
+  /** Короткая пауза по предложению (минуты) — для кнопки «Другое», чтобы не пинг-понгить. */
+  snoozeFor(taskId: number, minutes: number): void {
+    const until = new Date(this.clock.now().getTime() + minutes * 60_000).toISOString();
+    this.settings.setSnooze(taskId, until);
+    this.repo.addEvent('SUGGESTION_SNOOZED', { taskId, payload: { until, minutes } }, this.now());
+  }
+
   rejectSuggestion(taskId: number): void {
     this.repo.addEvent('SUGGESTION_REJECTED', { taskId }, this.now());
   }

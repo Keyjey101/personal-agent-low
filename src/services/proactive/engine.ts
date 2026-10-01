@@ -162,16 +162,16 @@ export class ProactiveEngine {
     const workEnd = parseHMint(cfg.work.end);
     if (p.hm < workEnd + 5) return;
     if (this.queueFlushedFor === p.dateStr) return;
-    this.queueFlushedFor = p.dateStr;
 
     const first = [...this.queued.values()][0];
-    this.queued.clear();
     const decision = this.sendWindow(first.critical, tz, now);
-    if (decision.action !== 'send') return;
-    void this.deps.llm.shortText(PROACTIVE_SYSTEM, first.hint).then((text) => {
-      const t = text ?? `${first.hint}\nДелаешь?`;
-      void this.send(t, first.topic, first.critical, first.taskId ?? null);
-    });
+    if (decision.action !== 'send') return; // подавлено — не чистим, попробуем следующим тиком
+
+    this.queueFlushedFor = p.dateStr;
+    this.queued.clear();
+    void this.deps.llm.shortText(PROACTIVE_SYSTEM, first.hint)
+      .then((text) => this.send(text ?? `${first.hint}\nДелаешь?`, first.topic, first.critical, first.taskId ?? null))
+      .catch((e) => this.deps.log.error({ err: (e as Error).message }, 'flushQueue send failed'));
   }
 
   /* ---------- общие ---------- */
@@ -196,10 +196,16 @@ export class ProactiveEngine {
   private async send(text: string, topic: string, critical: boolean, taskId: number | null): Promise<void> {
     const { repo, settings, clock } = this.deps;
     const nowIso = clock.now().toISOString();
-    await this.deps.sender(text, taskId);
-    repo.addEvent('PROACTIVE_SENT', { taskId, payload: { topic, critical, text } }, nowIso);
+    // сначала помечаем тему (защита от ретрая при падении отправки), потом шлём
     settings.setProactiveTopic(topic, registerSend(settings.proactiveState()[topic], clock.now()));
+    await this.deps.sender(this.escapeText(text), taskId);
+    repo.addEvent('PROACTIVE_SENT', { taskId, payload: { topic, critical, text } }, nowIso);
     this.deps.log.info({ topic, critical }, 'proactive sent');
+  }
+
+  /** Тексты генерит модель — экранируем всё, кроме нашей разметки (её здесь нет). */
+  private escapeText(text: string): string {
+    return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   }
 
   private logSuppressed(topic: string, reason: string): void {

@@ -86,7 +86,7 @@ export async function buildHttpServer(deps: HttpDeps): Promise<FastifyInstance> 
     };
   });
 
-  app.post('/api/state', async (req) => {
+  app.post('/api/state', async (req, reply) => {
     const body = z.object({
       energy: z.number().int().min(1).max(10).optional(),
       mood: z.string().max(100).optional(),
@@ -95,7 +95,7 @@ export async function buildHttpServer(deps: HttpDeps): Promise<FastifyInstance> 
       intoxication: z.enum(['none', 'mild', 'significant']).optional(),
       note: z.string().max(300).optional(),
     }).safeParse(req.body);
-    if (!body.success) return { error: body.error.issues[0].message };
+    if (!body.success) return reply.code(400).send({ error: body.error.issues[0].message });
     ops.recordState(body.data);
     return { ok: true };
   });
@@ -108,12 +108,12 @@ export async function buildHttpServer(deps: HttpDeps): Promise<FastifyInstance> 
     return repo.listProjects(q.status).map((p) => ({ ...p, open_tasks: counts.get(p.id) ?? 0 }));
   });
 
-  app.post('/api/projects', async (req) => {
+  app.post('/api/projects', async (req, reply) => {
     const body = z.object({
       name: z.string().min(1), description: z.string().optional(),
       area: z.string().default('other'), priority: z.number().int().min(1).max(5).optional(),
     }).safeParse(req.body);
-    if (!body.success) return { error: body.error.issues[0].message };
+    if (!body.success) return reply.code(400).send({ error: body.error.issues[0].message });
     return repo.createProject(body.data, new Date().toISOString());
   });
 
@@ -126,14 +126,14 @@ export async function buildHttpServer(deps: HttpDeps): Promise<FastifyInstance> 
     return { project: p, tasks, blocked_task_ids: [...blocked].filter((i) => tasks.some((t) => t.id === i)) };
   });
 
-  app.patch('/api/projects/:id', async (req) => {
+  app.patch('/api/projects/:id', async (req, reply) => {
     const id = Number((req.params as any).id);
     const body = z.object({
       name: z.string().min(1).optional(), description: z.string().optional(),
       status: z.enum(['active', 'paused', 'done', 'cancelled']).optional(),
       priority: z.number().int().min(1).max(5).optional(),
     }).safeParse(req.body);
-    if (!body.success) return { error: body.error.issues[0].message };
+    if (!body.success) return reply.code(400).send({ error: body.error.issues[0].message });
     const p = repo.updateProject(id, body.data, new Date().toISOString());
     if (p) repo.addEvent('PROJECT_UPDATED', { projectId: id, payload: { via: 'web' } }, new Date().toISOString());
     return p ?? { error: 'не найден' };
@@ -151,7 +151,7 @@ export async function buildHttpServer(deps: HttpDeps): Promise<FastifyInstance> 
     });
   });
 
-  app.post('/api/tasks', async (req) => {
+  app.post('/api/tasks', async (req, reply) => {
     const body = z.object({
       title: z.string().min(1), project_id: z.number().int().nullable().optional(),
       description: z.string().optional(),
@@ -164,11 +164,11 @@ export async function buildHttpServer(deps: HttpDeps): Promise<FastifyInstance> 
       tags: z.array(z.string()).optional(),
       status: z.enum(['idea', 'todo', 'next']).optional(),
     }).safeParse(req.body);
-    if (!body.success) return { error: body.error.issues[0].message };
+    if (!body.success) return reply.code(400).send({ error: body.error.issues[0].message });
     return ops.createTask(body.data as CreateTaskInput, 'user');
   });
 
-  app.patch('/api/tasks/:id', async (req) => {
+  app.patch('/api/tasks/:id', async (req, reply) => {
     const id = Number((req.params as any).id);
     const body = z.object({
       title: z.string().min(1).optional(), description: z.string().optional(),
@@ -182,16 +182,16 @@ export async function buildHttpServer(deps: HttpDeps): Promise<FastifyInstance> 
       deferred_until: z.string().nullable().optional(),
       tags: z.array(z.string()).optional(),
     }).safeParse(req.body);
-    if (!body.success) return { error: body.error.issues[0].message };
-    try { return ops.updateTask(id, body.data); } catch (e) { return { error: (e as Error).message }; }
+    if (!body.success) return reply.code(400).send({ error: body.error.issues[0].message });
+    try { return ops.updateTask(id, body.data); } catch (e) { return reply.code(400).send({ error: (e as Error).message }); }
   });
 
-  app.post('/api/tasks/:id/complete', async (req) => {
+  app.post('/api/tasks/:id/complete', async (req, reply) => {
     const id = Number((req.params as any).id);
     try {
       const r = ops.completeTask(id);
       return { ok: true, task: r.task, recurrence_instance_id: r.newInstance?.id ?? null };
-    } catch (e) { return { error: (e as Error).message }; }
+    } catch (e) { return reply.code(400).send({ error: (e as Error).message }); }
   });
 
   app.post('/api/tasks/:id/snooze', async (req) => {
@@ -205,28 +205,28 @@ export async function buildHttpServer(deps: HttpDeps): Promise<FastifyInstance> 
 
   app.get('/api/memory', async () => repo.listMemory(false));
 
-  app.post('/api/memory', async (req) => {
+  app.post('/api/memory', async (req, reply) => {
     const body = z.object({
       kind: z.enum(['preference', 'fact', 'insight', 'routine', 'pattern']),
       content: z.string().min(3),
     }).safeParse(req.body);
-    if (!body.success) return { error: body.error.issues[0].message };
+    if (!body.success) return reply.code(400).send({ error: body.error.issues[0].message });
     return repo.insertMemory({ ...body.data, source: 'user_told' }, new Date().toISOString());
   });
 
-  app.patch('/api/memory/:id', async (req) => {
+  app.patch('/api/memory/:id', async (req, reply) => {
     const id = Number((req.params as any).id);
     const body = z.object({ is_active: z.boolean() }).safeParse(req.body);
-    if (!body.success) return { error: 'нужен is_active' };
+    if (!body.success) return reply.code(400).send({ error: 'нужен is_active' });
     repo.setMemoryActive(id, body.data.is_active, new Date().toISOString());
     return { ok: true };
   });
 
-  app.get('/api/events', async (req) => {
+  app.get('/api/events', async (req, reply) => {
     const q = req.query as { type?: string; since?: string; limit?: string };
-    return repo.listEvents({
-      type: q.type, since: q.since, limit: Math.min(Number(q.limit ?? 100), 500),
-    });
+    const parsedLimit = parseInt(String(q.limit ?? '100'), 10);
+    const limit = Math.min(Number.isFinite(parsedLimit) && parsedLimit > 0 ? parsedLimit : 100, 500);
+    return repo.listEvents({ type: q.type, since: q.since, limit });
   });
 
   app.get('/api/entities', async () => ({
@@ -245,9 +245,9 @@ export async function buildHttpServer(deps: HttpDeps): Promise<FastifyInstance> 
     return out;
   });
 
-  app.patch('/api/settings', async (req) => {
+  app.patch('/api/settings', async (req, reply) => {
     const body = z.record(z.any()).safeParse(req.body);
-    if (!body.success) return { error: 'некорректный JSON' };
+    if (!body.success) return reply.code(400).send({ error: 'некорректный JSON' });
     for (const [k, v] of Object.entries(body.data)) {
       if (!SETTING_KEYS.includes(k)) continue;
       if (k === 'proactivity_level' && (typeof v !== 'number' || v < 0 || v > 4)) continue;

@@ -3,6 +3,7 @@ import { TaskOps } from './taskops';
 import { Settings } from './settings';
 import { Clock } from '../clock';
 import { Session, Task } from '../domain/types';
+import { htmlEscape } from '../infra/telegram/escape';
 
 /**
  * Режим «веди меня N минут» (ТЗ 10.1 /lead): агент выдаёт действия
@@ -16,7 +17,16 @@ export class SessionService {
 
   start(minutes: number, mode: 'guide' | 'micro' = 'guide'): Session {
     const existing = this.active();
-    if (existing) this.repo.updateSession(existing.id, { status: 'aborted' });
+    if (existing) {
+      // не оставляем «залипшую» active-задачу от прошлой сессии
+      if (existing.current_task_id) {
+        const prev = this.repo.getTask(existing.current_task_id);
+        if (prev && prev.status === 'active') {
+          this.repo.updateTask(prev.id, { status: 'todo' }, this.clock.now().toISOString());
+        }
+      }
+      this.repo.updateSession(existing.id, { status: 'aborted' });
+    }
     const s = this.repo.insertSession(mode, minutes, this.clock.now().toISOString());
     this.repo.addEvent('SESSION_START', { payload: { minutes, sessionId: s.id } }, this.clock.now().toISOString());
     return s;
@@ -42,16 +52,19 @@ export class SessionService {
     this.repo.updateTask(top.task.id, { status: 'active' }, this.clock.now().toISOString());
     this.repo.updateSession(s.id, { current_task_id: top.task.id });
     await this.sender(
-      `Веду.\n\nДействие: ${top.task.title}.\n~${top.task.estimated_minutes ?? 30} мин.\n\nНапиши «готово», когда закончишь.`,
+      `Веду.\n\nДействие: <b>${htmlEscape(top.task.title)}</b>.\n~${top.task.estimated_minutes ?? 30} мин.\n\nНапиши «готово», когда закончишь.`,
       top.task.id,
     );
   }
 
-  /** Пользователь завершил текущее действие сессии. */
+  /** Пользователь завершил текущее действие сессии. Идемпотентно: задача уже closed — считаем успехом. */
   async doneCurrent(note?: string): Promise<boolean> {
     const s = this.active();
     if (!s || !s.current_task_id) return false;
-    this.ops.completeTask(s.current_task_id, note);
+    const cur = this.repo.getTask(s.current_task_id);
+    if (cur && cur.status !== 'done' && cur.status !== 'cancelled') {
+      this.ops.completeTask(s.current_task_id, note);
+    }
     this.repo.updateSession(s.id, { completed_count: s.completed_count + 1, current_task_id: null });
     await this.proposeNext();
     return true;

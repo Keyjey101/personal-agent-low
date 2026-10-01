@@ -10,6 +10,7 @@ import { buildContext } from './context';
 import { FORCE_REPLY_NUDGE, REPAIR_NUDGE, SYSTEM_PROMPT } from './prompts';
 import { GlmLimitError, GlmUnavailableError } from '../../domain/errors';
 import { shortLocal } from '../../domain/time';
+import { htmlEscape } from '../../infra/telegram/escape';
 import type { Logger } from 'pino';
 
 const MAX_ROUNDS = 3;
@@ -173,7 +174,8 @@ export class AgentLoop {
       text: outText,
       payload: { propose_task_id: replyPlan?.propose_task_id ?? null, planned_ops: allOps },
     }, this.deps.clock.now().toISOString());
-    return { text: outText, proposeTaskId: replyPlan?.propose_task_id ?? null, fallback: false };
+    // текст модели — обычная проза, экранируем: форматирование добавляют только шаблоны
+    return { text: htmlEscape(outText), proposeTaskId: replyPlan?.propose_task_id ?? null, fallback: false };
   }
 
   /** Применить пакет write-операций одной транзакцией; null = откат с ошибкой. */
@@ -201,9 +203,9 @@ export class AgentLoop {
   /** GLM недоступен — детерминированный ответ по скорингу (ТЗ 7.6). */
   private deterministicFallback(reason: string): TurnResult {
     const top = this.deps.ops.topAction();
-    const head = `⚠️ Мозг offline (${reason}), действую по алгоритму.`;
+    const head = `⚠️ Мозг offline (${htmlEscape(reason)}), действую по алгоритму.`;
     const text = top
-      ? `${head}\n\nДействие: ${top.task.title}.\n~${top.task.estimated_minutes ?? 30} мин.`
+      ? `${head}\n\nДействие: <b>${htmlEscape(top.task.title)}</b>.\n~${top.task.estimated_minutes ?? 30} мин.`
       : `${head}\n\nПодходящих задач под текущее состояние не нашлось.`;
     this.deps.repo.addEvent('AGENT_MESSAGE', { text, payload: { fallback: true, reason } }, this.deps.clock.now().toISOString());
     return { text, proposeTaskId: top?.task.id ?? null, fallback: true };

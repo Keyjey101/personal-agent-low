@@ -39,11 +39,12 @@ export class Scheduler {
     if (this.running) return;
     this.running = true;
     try {
-      await this.deps.lock.run(async () => {
-        await this.deps.engine.tick();
-        await this.deps.sessions.expireOverdue();
-        await this.dailyJobs();
-      });
+      // глобальный write-lock здесь не нужен: перекрытие тиков исключает
+      // this.running, а записи идут короткими транзакциями на уровне SQLite.
+      // Долгие сетевые I/O (Telegram/GLM) не должны блокировать ходы агента.
+      await this.deps.engine.tick();
+      await this.deps.sessions.expireOverdue();
+      await this.dailyJobs();
     } catch (e) {
       this.deps.log.error({ err: (e as Error).stack }, 'scheduler tick failed');
     } finally {

@@ -52,3 +52,18 @@ th { color: var(--dim); font-weight: 500; font-size: 13px; }
 .big-action { font-size: 19px; font-weight: 600; margin: 6px 0; }
 .login-box { width: 320px; margin: 15vh auto; }
 .tag { display: inline-block; background: var(--panel2); border-radius: 4px; padding: 0 6px; margin: 0 2px; font-size: 12px; }
+
+@media (max-width: 720px) {
+  .layout { flex-direction: column; }
+  .sidebar {
+    width: 100%; height: auto; position: static;
+    flex-direction: row; align-items: center; flex-wrap: wrap;
+    padding: 8px 10px; gap: 6px;
+  }
+  .sidebar h1 { font-size: 15px; margin: 0 8px 0 0; }
+  .sidebar nav { flex-direction: row; flex-wrap: wrap; gap: 2px; }
+  .sidebar nav button { padding: 6px 8px; font-size: 13px; }
+  .logout { margin: 0 0 0 auto; padding: 6px 8px; font-size: 13px; }
+  main { padding: 12px; }
+  table { display: block; overflow-x: auto; }
+}

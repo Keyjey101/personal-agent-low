@@ -52,6 +52,9 @@ export class Reflector {
     const p = localParts(now, settings.tz());
     if (p.hm < hour * 60) return;
     if (repo.getJson<string>('last_reflection_day', '') === p.dateStr) return;
+    // cooldown после сбоя: не дёргаем API каждые 30 секунд тика планировщика
+    if (Date.now() - this.lastAttemptAt < 30 * 60_000) return;
+    this.lastAttemptAt = Date.now();
 
     const since = repo.getJson<string>('last_reflection_at', '');
     if (since) {
@@ -62,27 +65,46 @@ export class Reflector {
     try {
       await this.run(maxEvents, since);
     } catch (e) {
-      if (e instanceof GlmLimitError || e instanceof GlmUnavailableError) {
-        this.deps.log.warn({ err: (e as Error).message }, 'reflector skipped: glm unavailable');
-        return; // попробуем в следующий тик/день
+      if (e instanceof GlmLimitError) {
+        // лимит исчерпан — в этот день больше не пытаемся (иначе бомба расходов)
+        this.deps.log.warn('reflector skipped: daily token limit');
+        repo.setJson('last_reflection_day', p.dateStr);
+        return;
+      }
+      if (e instanceof GlmUnavailableError) {
+        this.deps.log.warn({ err: (e as Error).message }, 'reflector skipped: glm unavailable, cooldown 30 min');
+        return; // повторим через cooldown
       }
       throw e;
     }
     repo.setJson('last_reflection_day', p.dateStr);
   }
 
+  private lastAttemptAt = 0;
+
   async run(maxEvents: number, since: string): Promise<string> {
     const { repo, llm, clock } = this.deps;
     const nowIso = clock.now().toISOString();
     const sinceIso = since || new Date(0).toISOString();
-    const events = repo.listEvents({ since: sinceIso, limit: maxEvents }).reverse()
-      .map((e) => ({
-        ts: e.ts, type: e.type, task_id: e.task_id, project_id: e.project_id,
-        text: (e.text ?? '').slice(0, 200),
-      }));
-    if (!events.length) { repo.setJson('last_reflection_at', nowIso); return 'нет событий'; }
+    // берём СТАРЫЕ события вперёд: всё, что не влезло в cap, вернётся следующим прогоном
+    const fetched = repo.listEvents({ since: sinceIso, limit: maxEvents }).reverse(); // новые→старые → разворот = старые вперёд
+    if (!fetched.length) { repo.setJson('last_reflection_at', nowIso); return 'нет событий'; }
 
-    const memory = repo.listMemory(true).map((m) => ({ id: m.id, kind: m.kind, content: m.content }));
+    // кап по символам: срезаем новые, чтобы промпт не разросся
+    const MAX_PROMPT_CHARS = 60_000;
+    const events: { ts: string; type: string; task_id: number | null; project_id: number | null; text: string }[] = [];
+    let used = 0;
+    for (const e of fetched) {
+      const item = { ts: e.ts, type: e.type, task_id: e.task_id, project_id: e.project_id, text: (e.text ?? '').slice(0, 200) };
+      const size = JSON.stringify(item).length;
+      if (used + size > MAX_PROMPT_CHARS && events.length > 0) break;
+      events.push(item);
+      used += size;
+    }
+    // маркер — последнее включённое событие: необработанные вернутся завтра
+    const lastIncludedTs = events[events.length - 1].ts;
+
+    const memory = repo.listMemory(true).slice(0, 50).map((m) => ({ id: m.id, kind: m.kind, content: m.content }));
     const projects = repo.listProjects('active').map((p) => ({ id: p.id, name: p.name }));
 
     const messages: LlmMessage[] = [
@@ -159,7 +181,7 @@ export class Reflector {
       }
     }
 
-    repo.setJson('last_reflection_at', nowIso);
+    repo.setJson('last_reflection_at', lastIncludedTs);
     const text = summary || 'рефлексия завершена без итогового текста';
     repo.addEvent('REFLECTION_DONE', { text, payload: { events: events.length, ops: planned.map((p) => p.tool.name) } }, nowIso);
     this.deps.log.info({ events: events.length, ops: planned.length }, 'reflection done');

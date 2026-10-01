@@ -7,6 +7,7 @@ import { WriteLock } from '../../src/infra/db/client';
 import { systemClock } from '../../src/clock';
 import { createSilentLogger } from '../../src/logger';
 import { makeTestDb } from '../helpers/testdb';
+import { GlmLimitError } from '../../src/domain/errors';
 
 type Step = LlmResponse | ((messages: LlmMessage[]) => LlmResponse);
 
@@ -78,5 +79,25 @@ describe('reflector — ночная рефлексия', () => {
     // день отмечен либо прогоном, либо ещё не наступил час: повторный вызов идемпотентен
     await reflector.runIfNeeded(4, 200);
     expect(repo.listEvents({ type: 'REFLECTION_DONE', limit: 10 }).length).toBeLessThanOrEqual(1);
+  });
+
+  it('при исчерпании дневного лимита GLM день помечается — нет бомбы 30-секундных ретраев', async () => {
+    const { reflector, repo } = makeReflector([]);
+    // лимит срабатывает ДО вызова API (pre-check), поэтому пустой скрипт не нужен
+    const llmLimit = new GlmLimitError();
+    const failing = reflector as unknown as { run: () => Promise<string> };
+    const origRun = failing.run.bind(reflector);
+    failing.run = async () => { throw llmLimit; };
+    repo.addEvent('USER_MESSAGE', { text: 'привет' }, new Date().toISOString());
+
+    await reflector.runIfNeeded(0, 200); // hour=0 — время точно подошло
+    const day1 = repo.getJson<string>('last_reflection_day', '');
+    expect(day1).not.toBe(''); // день помечен
+
+    failing.run = origRun;
+    await reflector.runIfNeeded(0, 200); // второй вызов — run уже не должен вызываться
+    // день по-прежнему помечен, REFLECTION_DONE не появилось
+    expect(repo.listEvents({ type: 'REFLECTION_DONE', limit: 10 })).toHaveLength(0);
+    expect(repo.getJson<string>('last_reflection_day', '')).toBe(day1);
   });
 });

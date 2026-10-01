@@ -48,6 +48,10 @@ export class LlmClient {
 
   /** Основной вызов с ретраями. Бросает GlmUnavailableError после исчерпания попыток. */
   async chat(messages: LlmMessage[], tools?: ToolSpec[]): Promise<LlmResponse> {
+    // предохранитель ДО вызова: не платим за запрос, который всё равно не зачтётся
+    if (this.cfg.dailyTokenLimit > 0 && this.tokensToday >= this.cfg.dailyTokenLimit) {
+      throw new GlmLimitError();
+    }
     let lastErr: unknown;
     for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
       if (attempt > 0) {
