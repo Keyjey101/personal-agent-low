@@ -10,12 +10,24 @@ interface StateResp {
   muted_topics: { topic: string; mutedUntil: string }[];
 }
 
+interface StatsResp {
+  today: { completed: number; proactiveSent: number; rejected: number; snoozed: number };
+  last14: { date: string; completed: number }[];
+  daysWithProgress7: number;
+  completed7: number;
+  acceptance7: { sent: number; rejected: number; snoozed: number };
+}
+
 export function TodayPage() {
   const [data, setData] = useState<StateResp | null>(null);
+  const [stats, setStats] = useState<StatsResp | null>(null);
   const [msg, setMsg] = useState('');
   const [form, setForm] = useState({ energy: 5, available_minutes: 60, intoxication: 'none' });
 
-  const load = useCallback(() => api<StateResp>('/api/state').then(setData).catch((e) => setMsg((e as Error).message)), []);
+  const load = useCallback(() => {
+    api<StateResp>('/api/state').then(setData).catch((e) => setMsg((e as Error).message));
+    api<StatsResp>('/api/stats').then(setStats).catch(() => undefined);
+  }, []);
   useEffect(() => { void load(); }, [load]);
 
   const act = async (path: string, body?: unknown) => {
@@ -84,6 +96,28 @@ export function TodayPage() {
           </div>
         ))}
       </div>
+
+      {stats && (
+        <div className="card">
+          <h2>Динамика (14 дней)</h2>
+          <div className="row small dim" style={{ marginBottom: 8 }}>
+            <span>за 7 дней: <b>{stats.completed7}</b> задач</span>
+            <span>дней с делами: <b>{stats.daysWithProgress7}/7</b></span>
+            <span>предложений отклонено/отложено: <b>{stats.acceptance7.rejected + stats.acceptance7.snoozed}/{stats.acceptance7.sent}</b></span>
+          </div>
+          <div className="row" style={{ alignItems: 'flex-end', gap: 3, height: 48 }}>
+            {stats.last14.map((d) => (
+              <div key={d.date} title={`${d.date}: ${d.completed}`} style={{
+                flex: 1, minWidth: 8,
+                height: `${Math.min(100, d.completed * 25)}%`,
+                minHeight: d.completed ? 6 : 2,
+                background: d.completed ? 'var(--accent)' : 'var(--border)',
+                borderRadius: 2,
+              }} />
+            ))}
+          </div>
+        </div>
+      )}
 
       {data.muted_topics.length > 0 && (
         <div className="card">

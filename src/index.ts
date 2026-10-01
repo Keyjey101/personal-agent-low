@@ -16,6 +16,7 @@ import { TgBot } from './infra/telegram/bot';
 import { buildHttpServer } from './infra/http/server';
 import { ensureSeed } from './services/seed';
 import { Reflector } from './services/reflector';
+import { StatsService } from './services/stats';
 import { systemClock } from './clock';
 
 async function main(): Promise<void> {
@@ -52,6 +53,7 @@ async function main(): Promise<void> {
   const engine = new ProactiveEngine({ repo, ops, settings, llm, clock, log: logger, sender: (text, tid) => bot.sendToUser(text, tid) });
   const backup = new BackupService(db, repo, config.DATA_DIR, () => settings.tz(), clock, logger);
   const reflector = new Reflector({ llm, repo, ops, settings, clock, lock, log: logger });
+  const stats = new StatsService(repo, settings, clock);
   const scheduler = new Scheduler({
     clock, repo, settings, engine, sessions, backup, reflector, lock, log: logger,
     reflectorEnabled: config.REFLECTOR_ENABLED,
@@ -60,7 +62,7 @@ async function main(): Promise<void> {
   });
 
   /* ---------- HTTP ---------- */
-  const server = await buildHttpServer({ config, repo, ops, settings, backup, log: logger });
+  const server = await buildHttpServer({ config, repo, ops, settings, backup, stats, log: logger });
   await server.listen({ port: config.PORT, host: '0.0.0.0' });
   // eslint-disable-next-line no-console
   console.log(`[http] listening on :${config.PORT}`);

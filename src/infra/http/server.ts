@@ -8,6 +8,7 @@ import { Repo, CreateTaskInput } from '../db/repos';
 import { TaskOps } from '../../services/taskops';
 import { Settings } from '../../services/settings';
 import { BackupService } from '../../services/backup';
+import { StatsService } from '../../services/stats';
 import { AppConfig } from '../../config';
 import { z } from 'zod';
 import { localParts, todayStartIso } from '../../domain/time';
@@ -19,6 +20,7 @@ export interface HttpDeps {
   ops: TaskOps;
   settings: Settings;
   backup: BackupService;
+  stats: StatsService;
   log: Logger;
 }
 
@@ -201,6 +203,11 @@ export async function buildHttpServer(deps: HttpDeps): Promise<FastifyInstance> 
     return { ok: true };
   });
 
+  app.post('/api/tasks/:id/reopen', async (req, reply) => {
+    const id = Number((req.params as any).id);
+    try { return ops.reopenTask(id); } catch (e) { return reply.code(400).send({ error: (e as Error).message }); }
+  });
+
   /* ---------- память / события / граф ---------- */
 
   app.get('/api/memory', async () => repo.listMemory(false));
@@ -233,6 +240,10 @@ export async function buildHttpServer(deps: HttpDeps): Promise<FastifyInstance> 
     entities: repo.listEntities(),
     edges: repo.listEntityEdges(),
   }));
+
+  /* ---------- статистика ---------- */
+
+  app.get('/api/stats', async () => deps.stats.overview());
 
   /* ---------- настройки ---------- */
 

@@ -448,6 +448,14 @@ export class Repo {
     return new Set(rows.map((r) => r.project_id as number));
   }
 
+  /** Число завершённых задач по проектам за период — градиент «движения». */
+  projectCompletionCountsSince(iso: string): Map<number, number> {
+    const rows = this.db.prepare(
+      "SELECT project_id, COUNT(*) n FROM events WHERE type = 'TASK_COMPLETED' AND project_id IS NOT NULL AND ts >= ? GROUP BY project_id",
+    ).all(iso) as Row[];
+    return new Map(rows.map((r) => [r.project_id as number, r.n as number]));
+  }
+
   lastCompletedAtForProject(projectId: number): string | null {
     const r = this.db.prepare(
       "SELECT MAX(ts) m FROM events WHERE type = 'TASK_COMPLETED' AND project_id = ?",

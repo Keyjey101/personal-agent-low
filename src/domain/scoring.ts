@@ -13,6 +13,7 @@ export interface ScoringContext {
   blockedIds: Set<number>;
   snoozed: Map<number, string>;       // taskId -> ISO «до»
   momentumProjectIds: Set<number>;    // проекты с done за последние 7 дней
+  momentumCounts?: Map<number, number>; // сколько именно done — градиент движения
   weights: ScoringWeights;
 }
 
@@ -67,7 +68,10 @@ export function scoreTask(task: Task, ctx: ScoringContext): Ranked {
   }
 
   if (task.project_id && ctx.momentumProjectIds.has(task.project_id)) {
-    score += w.momentum_7d;
+    // градиент: 1 done за неделю — базовый бонус, каждый следующий +50%, максимум ×2
+    const n = ctx.momentumCounts?.get(task.project_id) ?? 1;
+    const bonus = w.momentum_7d * Math.min(1 + 0.5 * Math.max(0, n - 1), 2);
+    score += bonus;
     reasons.push('проект в движении');
   }
 

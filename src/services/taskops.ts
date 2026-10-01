@@ -85,6 +85,16 @@ export class TaskOps {
     return updated;
   }
 
+  /** Вернуть случайно закрытую задачу в работу (undo). */
+  reopenTask(id: number): Task {
+    const task = this.repo.getTask(id);
+    if (!task) throw new ValidationError(`Задача ${id} не найдена`);
+    if (task.status !== 'done') throw new ValidationError(`Вернуть можно только выполненную задачу (статус ${task.status})`);
+    const updated = this.repo.updateTask(id, { status: 'todo', completed_at: null, started_at: null }, this.now())!;
+    this.repo.addEvent('TASK_REOPENED', { taskId: id, projectId: task.project_id, payload: {} }, this.now());
+    return updated;
+  }
+
   splitTask(id: number, subtasks: { title: string; estimated_minutes?: number; energy_required?: number }[]): Task[] {
     const parent = this.repo.getTask(id);
     if (!parent) throw new ValidationError(`Задача ${id} не найдена`);
@@ -150,13 +160,16 @@ export class TaskOps {
 
   scoringContext(): ScoringContext {
     const now = this.clock.now();
+    const since = new Date(now.getTime() - 7 * 86_400_000).toISOString();
+    const momentumCounts = this.repo.projectCompletionCountsSince(since);
     return {
       now,
       todayLocal: localParts(now, this.settings.tz()).dateStr,
       state: this.currentState(),
       blockedIds: this.repo.blockedIds(),
       snoozed: this.settings.snoozes(),
-      momentumProjectIds: this.repo.projectIdsCompletedSince(new Date(now.getTime() - 7 * 86_400_000).toISOString()),
+      momentumProjectIds: new Set(momentumCounts.keys()),
+      momentumCounts,
       weights: this.settings.scoringWeights(),
     };
   }

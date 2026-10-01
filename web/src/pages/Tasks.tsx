@@ -77,7 +77,11 @@ export function TasksPage() {
                     {STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
                   </select>
                 </td>
-                <td>{t.status !== 'done' && <button className="small" onClick={() => void api(`/api/tasks/${t.id}/complete`, { method: 'POST' }).then(load)}>готово</button>}</td>
+                <td>
+                  {t.status === 'done'
+                    ? <button className="small" onClick={() => void api(`/api/tasks/${t.id}/reopen`, { method: 'POST' }).then(load)}>вернуть</button>
+                    : <button className="small" onClick={() => void api(`/api/tasks/${t.id}/complete`, { method: 'POST' }).then(load)}>готово</button>}
+                </td>
               </tr>
             ))}
           </tbody>
