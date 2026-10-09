@@ -48,9 +48,9 @@ async function main(): Promise<void> {
     getSessions: () => sessions,
   });
 
-  const sessions: SessionService = new SessionService(repo, ops, settings, clock, (text, tid) => bot.sendToUser(text, tid));
+  const sessions: SessionService = new SessionService(repo, ops, settings, clock, (text, tid, kb) => bot.sendToUser(text, tid, kb));
   const loop: AgentLoop = new AgentLoop({ llm, repo, ops, settings, sessions, clock, lock, log: logger });
-  const engine = new ProactiveEngine({ repo, ops, settings, llm, clock, log: logger, sender: (text, tid) => bot.sendToUser(text, tid) });
+  const engine = new ProactiveEngine({ repo, ops, settings, llm, clock, log: logger, sender: (text, tid, kb) => bot.sendToUser(text, tid, kb) });
   const backup = new BackupService(db, repo, config.DATA_DIR, () => settings.tz(), clock, logger);
   const reflector = new Reflector({ llm, repo, ops, settings, clock, lock, log: logger });
   const stats = new StatsService(repo, settings, clock);

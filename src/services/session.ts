@@ -11,7 +11,7 @@ import { htmlEscape } from '../infra/telegram/escape';
  */
 export class SessionService {
   constructor(private repo: Repo, private ops: TaskOps, private settings: Settings,
-              private clock: Clock, private sender: (text: string, proposeTaskId?: number | null) => Promise<void>) {}
+              private clock: Clock, private sender: (text: string, proposeTaskId?: number | null, keyboard?: 'action' | 'night') => Promise<void>) {}
 
   active(): Session | null { return this.repo.activeSession(); }
 

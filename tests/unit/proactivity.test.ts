@@ -122,17 +122,45 @@ describe('stale-проекты', () => {
 describe('evalRules', () => {
   const base = {
     now: TUE_EVENING, tz: 'Europe/Moscow', todayLocal: '2026-09-29', cfg,
-    tasks: [] as Task[], candidates: [mkRanked('Помыть ванну')], completedToday: 0, staleProjects: [],
+    tasks: [] as Task[], candidates: [mkRanked('Помыть ванну')], completedToday: 0,
+    completedTodayTitles: [] as string[], staleProjects: [],
   };
 
-  it('вечер буднего дня без свершений → evening_window', () => {
-    const out = evalRules(base);
-    expect(out.some((c) => c.topic === 'evening')).toBe(true);
+  it('вечерний ритуал: окно 21:30–23:00, итоги дня + короткое действие', () => {
+    const at2130 = new Date('2026-09-29T18:30:00Z'); // 21:30 Москвы
+    const out = evalRules({
+      ...base, now: at2130, completedToday: 2,
+      candidates: [mkRanked('Почистить пылесос', 10)],
+      completedTodayTitles: ['Снять шаблон окна на кальку', 'Оплатить коммуналку'],
+    });
+    const r = out.find((c) => c.topic === 'ritual');
+    expect(r).toBeTruthy();
+    expect(r!.deterministic).toBe(true);
+    expect(r!.hint).toContain('сделано: 2');
+    expect(r!.hint).toContain('кальку');
+    expect(r!.hint).toContain('Почистить пылесос');
+    expect(r!.hint).toContain('доброй ночи');
   });
 
-  it('если сегодня уже сделано — не предлагает вечер', () => {
-    const out = evalRules({ ...base, completedToday: 1 });
-    expect(out.some((c) => c.topic === 'evening')).toBe(false);
+  it('пустой день — ритуал всё равно приходит, с коротким действием', () => {
+    const at2200 = new Date('2026-09-29T19:00:00Z'); // 22:00 Москвы
+    const out = evalRules({ ...base, now: at2200, candidates: [mkRanked('Почистить пылесос', 10)] });
+    const r = out.find((c) => c.topic === 'ritual');
+    expect(r).toBeTruthy();
+    expect(r!.hint).toContain('без выполненных задач');
+    expect(r!.taskId).toBe(1);
+  });
+
+  it('в 18:30 ритуал не приходит (окно с 21:30), старый evening_window удалён', () => {
+    const out = evalRules(base);
+    expect(out.find((c) => c.topic === 'ritual')).toBeFalsy();
+    expect(out.find((c) => c.topic === 'evening')).toBeFalsy();
+  });
+
+  it('ритуал выключается настройкой', () => {
+    const at2130 = new Date('2026-09-29T18:30:00Z');
+    const out = evalRules({ ...base, now: at2130, cfg: { ...cfg, ritual: { enabled: false, startHM: '21:30' } } });
+    expect(out.find((c) => c.topic === 'ritual')).toBeFalsy();
   });
 
   it('дедлайн ближе 48 часов → критичный кандидат', () => {

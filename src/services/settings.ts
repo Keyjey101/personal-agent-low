@@ -28,6 +28,7 @@ export class Settings {
   }
 
   proactiveCfg(): ProactiveCfg {
+    const ritual = this.repo.getJson<{ enabled: number | boolean; at?: string }>('evening_ritual', { enabled: 1, at: '21:30' });
     return {
       level: this.proactivityLevel(),
       staleProjectDays: this.repo.getJson<number>('stale_project_days', 10),
@@ -39,6 +40,7 @@ export class Settings {
         backoff: this.repo.getJson('backoff', DEFAULT_CFG.backoff),
       },
       muteDays: this.repo.getJson<number>('mute_days_after_explicit_no', 7),
+      ritual: { enabled: !!ritual.enabled, startHM: ritual.at ?? '21:30' },
     };
   }
 

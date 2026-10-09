@@ -9,7 +9,7 @@ import { ProactiveCandidate, checkSendWindow, evalRules, registerIgnoreIfStale, 
 import { PROACTIVE_SYSTEM } from '../agent/prompts';
 import type { Logger } from 'pino';
 
-export type Sender = (text: string, proposeTaskId?: number | null) => Promise<void>;
+export type Sender = (text: string, proposeTaskId?: number | null, keyboard?: 'action' | 'night') => Promise<void>;
 
 /**
  * Проактивный движок (ТЗ 8): напоминания + правила + бюджеты + backoff.
@@ -95,7 +95,10 @@ export class ProactiveEngine {
     const ranked = ops.getRanked();
     const openTasks = repo.listTasks({ status: ['todo', 'next', 'active', 'waiting'], limit: 500 })
       .filter((t) => t.due_at);
-    const completedToday = repo.countTypeSince('TASK_COMPLETED', todayStartIso(now, tz));
+    const doneToday = repo.listEvents({ type: 'TASK_COMPLETED', since: todayStartIso(now, tz), limit: 50 });
+    const completedTodayTitles = doneToday
+      .map((e) => (e.task_id ? repo.getTask(e.task_id)?.title : undefined))
+      .filter((t): t is string => !!t);
     const counts = repo.openCounts();
     const staleProjects: { id: number; name: string; lastCompletedAt: string | null; daysStale: number }[] = [];
     for (const pr of repo.listProjects('active')) {
@@ -111,7 +114,8 @@ export class ProactiveEngine {
 
     const cands = evalRules({
       now, tz, todayLocal: p.dateStr, cfg,
-      tasks: openTasks, candidates: ranked, completedToday, staleProjects,
+      tasks: openTasks, candidates: ranked,
+      completedToday: doneToday.length, completedTodayTitles, staleProjects,
     }).sort((a, b) => Number(b.critical) - Number(a.critical));
 
     const state = settings.proactiveState();
@@ -143,9 +147,14 @@ export class ProactiveEngine {
         continue;
       }
 
-      const text = (await this.deps.llm.shortText(PROACTIVE_SYSTEM, cand.hint))
-        ?? `${cand.hint}\nДелаешь?`;
-      await this.send(text, topic, cand.critical, cand.taskId ?? null);
+      const keyboard: 'night' | undefined = topic === 'ritual' ? 'night' : undefined;
+      if (cand.deterministic) {
+        await this.send(cand.hint, topic, cand.critical, cand.taskId ?? null, keyboard);
+      } else {
+        const text = (await this.deps.llm.shortText(PROACTIVE_SYSTEM, cand.hint))
+          ?? `${cand.hint}\nДелаешь?`;
+        await this.send(text, topic, cand.critical, cand.taskId ?? null, keyboard);
+      }
       break; // одно проактивное сообщение за тик
     }
   }
@@ -193,12 +202,12 @@ export class ProactiveEngine {
     });
   }
 
-  private async send(text: string, topic: string, critical: boolean, taskId: number | null): Promise<void> {
+  private async send(text: string, topic: string, critical: boolean, taskId: number | null, keyboard?: 'action' | 'night'): Promise<void> {
     const { repo, settings, clock } = this.deps;
     const nowIso = clock.now().toISOString();
     // сначала помечаем тему (защита от ретрая при падении отправки), потом шлём
     settings.setProactiveTopic(topic, registerSend(settings.proactiveState()[topic], clock.now()));
-    await this.deps.sender(this.escapeText(text), taskId);
+    await this.deps.sender(this.escapeText(text), taskId, keyboard);
     repo.addEvent('PROACTIVE_SENT', { taskId, payload: { topic, critical, text } }, nowIso);
     this.deps.log.info({ topic, critical }, 'proactive sent');
   }

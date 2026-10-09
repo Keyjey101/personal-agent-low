@@ -68,12 +68,14 @@ export class TgBot {
 
   /* ---------- отправка ---------- */
 
-  async sendToUser(text: string, proposeTaskId?: number | null): Promise<void> {
+  async sendToUser(text: string, proposeTaskId?: number | null, keyboard?: 'action' | 'night'): Promise<void> {
     const chunks = splitHtml(text, 4000);
     for (let i = 0; i < chunks.length; i++) {
-      const kb = i === chunks.length - 1 && proposeTaskId
-        ? actionKeyboard(proposeTaskId)
-        : undefined;
+      let kb: InlineKeyboard | undefined;
+      if (i === chunks.length - 1) {
+        if (keyboard === 'night') kb = nightKeyboard(proposeTaskId ?? 0);
+        else if (proposeTaskId) kb = actionKeyboard(proposeTaskId);
+      }
       await this.bot.api.sendMessage(
         this.deps.allowedChatId,
         chunks[i],
@@ -237,6 +239,14 @@ export class TgBot {
 
   private async handleCallback(ctx: Context & { callbackQuery?: { data: string; message?: { message_id: number } } }): Promise<void> {
     const data = ctx.callbackQuery?.data ?? '';
+    const night = data.match(/^a:night:(\d+)$/);
+    if (night) {
+      const taskId = parseInt(night[1], 10);
+      await ctx.answerCallbackQuery({}).catch(() => undefined);
+      this.deps.repo.addEvent('RITUAL_CLOSED', { taskId: taskId > 0 ? taskId : null, payload: {} }, new Date().toISOString());
+      await this.sendToUser('Доброй ночи. Я на связи.');
+      return;
+    }
     const m = data.match(/^a:(done|later|other|no):(\d+)$/);
     if (!m) return;
     const action = m[1];
@@ -316,6 +326,14 @@ function actionKeyboard(taskId: number) {
     .row()
     .text('🔀 Другое', `a:other:${taskId}`)
     .text('❌ Не буду', `a:no:${taskId}`);
+}
+
+/** Клавиатура вечернего ритуала: согласие на короткое действие или «доброй ночи». */
+function nightKeyboard(taskId: number) {
+  const kb = new InlineKeyboard();
+  if (taskId > 0) kb.text('✅ Сделаю', `a:done:${taskId}`).row();
+  kb.text('🌙 Доброй ночи', `a:night:${taskId}`);
+  return kb;
 }
 
 function currentActiveTaskId(repo: Repo): number | null {

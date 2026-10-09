@@ -12,6 +12,7 @@ export interface ProactiveCfg {
   backoff: { base_days: number; max_days: number };
   muteDays: number;
   staleProjectDays: number;
+  ritual?: { enabled: boolean; startHM: string };
 }
 
 /* ---------- окна отправки (ТЗ 8.3) ---------- */
@@ -138,6 +139,7 @@ export interface ProactiveCandidate {
   critical: boolean;
   minLevel: number;
   hint: string;           // данные для генерации текста
+  deterministic?: boolean; // true — отправить hint как есть, без GLM-фразировки
   taskId?: number;
   projectId?: number;
 }
@@ -166,6 +168,7 @@ export interface RuleInput {
   tasks: Task[];                      // открытые задачи с due_at
   candidates: Ranked[];               // ранжированные действия
   completedToday: number;
+  completedTodayTitles?: string[];    // названия выполненных сегодня — для вечернего ритуала
   staleProjects: { id: number; name: string; lastCompletedAt: string | null; daysStale?: number }[];
 }
 
@@ -189,20 +192,32 @@ export function evalRules(input: RuleInput): ProactiveCandidate[] {
   }
 
   if (cfg.level >= 2) {
-    // 2. evening_window: сразу после рабочих часов, сегодня ничего не сделано
-    const endM = parseHM(cfg.work.end);
-    const isWorkday = cfg.work.days.includes(p.weekday);
-    if (isWorkday && p.hm >= endM && p.hm < endM + 60 && completedToday === 0) {
-      const short = candidates.find((c) => (c.task.estimated_minutes ?? 30) <= 40);
-      if (short) {
+    // 2. вечерний ритуал «закрытие дня»: окно от cfg.ritual.startHM до тихих часов.
+    // Одно вечернее касание вместо старого evening_window (18:05) — по реальному
+    // ритму пользователя (активность 21:54–23:20). Формат детерминированный,
+    // без GLM: итоги дня + одно короткое действие или «доброй ночи».
+    const ritual = cfg.ritual ?? { enabled: true, startHM: '21:30' };
+    if (ritual.enabled) {
+      const startM = parseHM(ritual.startHM);
+      const endM = parseHM(cfg.quiet.start);
+      if (p.hm >= startM && p.hm < endM) {
+        const done = input.completedTodayTitles ?? [];
+        const short = candidates.find((c) => (c.task.estimated_minutes ?? 30) <= 10);
+        const doneStr = done.length
+          ? `Сегодня сделано: ${done.length} (${done.slice(0, 3).map((t) => `«${t}»`).join(', ')}).`
+          : 'Сегодня без выполненных задач.';
+        const actionStr = short
+          ? `Есть ~${short.task.estimated_minutes ?? 10} мин на «${short.task.title}»? Или доброй ночи.`
+          : 'Подходящих коротких задач нет — просто доброй ночи.';
         out.push({
-          key: 'evening_window', topic: 'evening', critical: false, minLevel: 2,
-          hint: `Вечер, сегодня ещё ничего не сделано. Есть окно. Подходит: «${short.task.title}» (~${short.task.estimated_minutes ?? 30} мин).`,
-          taskId: short.task.id, projectId: short.task.project_id ?? undefined,
+          key: 'evening_ritual', topic: 'ritual', critical: false, minLevel: 2,
+          deterministic: true, hint: `${doneStr}\n${actionStr}`,
+          taskId: short?.task.id, projectId: short?.task.project_id ?? undefined,
         });
       }
     }
     // 3. weekend_morning: выходные ~10:00
+    const isWorkday = cfg.work.days.includes(p.weekday);
     if (!isWorkday && p.hm >= 600 && p.hm < 660 && completedToday === 0 && candidates.length) {
       const best = candidates[0];
       out.push({

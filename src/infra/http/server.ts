@@ -248,7 +248,8 @@ export async function buildHttpServer(deps: HttpDeps): Promise<FastifyInstance> 
   /* ---------- настройки ---------- */
 
   const SETTING_KEYS = ['tz', 'proactivity_level', 'quiet_hours', 'work_hours',
-    'proactive_budget', 'backoff', 'mute_days_after_explicit_no', 'scoring_weights', 'stale_project_days'];
+    'proactive_budget', 'backoff', 'mute_days_after_explicit_no', 'scoring_weights',
+    'stale_project_days', 'evening_ritual'];
 
   app.get('/api/settings', async () => {
     const out: Record<string, unknown> = {};

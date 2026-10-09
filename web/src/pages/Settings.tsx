@@ -36,9 +36,29 @@ export function SettingsPage() {
   const qh = settings.quiet_hours ?? { start: '23:00', end: '09:00' };
   const wh = settings.work_hours ?? { start: '07:00', end: '18:00', days: ['mon', 'tue', 'wed', 'thu', 'fri'] };
   const pb = settings.proactive_budget ?? { max_per_day: 2, min_interval_hours: 4, max_critical_work_per_day: 1 };
+  const ritual = settings.evening_ritual ?? { enabled: 1, at: '21:30' };
 
   return (
     <div>
+      <div className="card">
+        <h2>Время</h2>
+        <div className="row">
+          <label className="small dim">таймзона (IANA, напр. Asia/Yekaterinburg)
+            <input value={String(settings.tz ?? '')} style={{ width: 200 }}
+              onChange={(e) => set('tz', e.target.value)} />
+          </label>
+          <label className="small dim">вечерний ритуал в
+            <input type="time" value={ritual.at ?? '21:30'}
+              onChange={(e) => set('evening_ritual', { ...ritual, at: e.target.value })} />
+          </label>
+          <label className="small dim">
+            <input type="checkbox" checked={!!ritual.enabled}
+              onChange={(e) => set('evening_ritual', { ...ritual, enabled: e.target.checked ? 1 : 0 })} />
+            ритуал включён
+          </label>
+        </div>
+      </div>
+
       <div className="card">
         <h2>Проактивность</h2>
         <div className="row" style={{ marginBottom: 10 }}>
