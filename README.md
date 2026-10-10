@@ -48,13 +48,18 @@ curl -f http://localhost:3000/healthz        # {"ok":true,"db":true}
 npm install
 npm test        # unit + integration
 npm run dev     # локальный запуск (tsx watch), нужен .env (кроме токенов — они нужны только для живого Telegram/GLM)
-npm run build   # tsc + vite build → dist/ + web-dist/
+npm run build   # tsc + копия web/ → web-dist/ (фронт без сборщика)
 npm start       # запуск собранного
+npm run web     # превью фронта без бэкенда: http://127.0.0.1:4173/index.html?demo
 ```
+
+Веб-панель — чистые HTML+CSS+vanilla JS (`web/`), без фреймворков и сборщика: правки в `web/`
+сразу попадают в прод через `npm run build`. Демо-режим `?demo` (плюс `#/login` для экрана входа)
+работает на фикстурах в памяти — удобно для вёрстки и скриншотов.
 
 ## Стек
 
-TypeScript · Node 24 · Fastify · grammY · node:sqlite (WAL + FTS5) · Zod · GLM (OpenAI-совместимый API) · React + Vite · Docker Compose за nginx.
+TypeScript · Node 24 · Fastify · grammY · node:sqlite (WAL + FTS5) · Zod · GLM (OpenAI-совместимый API) · веб-панель без фреймворков (Golos Text + JetBrains Mono) · Docker Compose за nginx.
 
 ## Отклонения от ТЗ (сознательные)
 

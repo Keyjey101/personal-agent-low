@@ -5,7 +5,8 @@
   "description": "Диспетчер — персональный операционный помощник: Telegram + GLM + SQLite",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsc -p tsconfig.json && vite build",
+    "build": "tsc -p tsconfig.json && node scripts/copy-web.mjs",
+    "web": "node scripts/serve-web.mjs",
     "start": "node dist/src/index.js",
     "test": "vitest run",
     "gen-secrets": "tsx scripts/gen-secrets.ts"
@@ -25,14 +26,8 @@
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
-    "@types/react": "^18.3.18",
-    "@types/react-dom": "^18.3.5",
-    "@vitejs/plugin-react": "^4.3.4",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
-    "vite": "^6.0.7",
     "vitest": "^3.0.5"
   }
 }
